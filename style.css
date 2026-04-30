@@ -1,0 +1,244 @@
+:root {
+  --color-bg: #f5f5f5;
+  --color-surface: #ffffff;
+  --color-border: #e0e0e0;
+  --color-text: #212121;
+  --color-text-secondary: #757575;
+  --color-polar: #1976d2;
+  --color-mc: #e53935;
+  --color-mc-point: #e53935;
+  --color-hover: #2e7d32;
+  --color-grid: #e0e0e0;
+  --color-axis: #424242;
+  --color-header-bg: #1565c0;
+  --color-header-text: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #121212;
+    --color-surface: #1e1e1e;
+    --color-border: #333333;
+    --color-text: #e0e0e0;
+    --color-text-secondary: #9e9e9e;
+    --color-polar: #64b5f6;
+    --color-mc: #ef9a9a;
+    --color-mc-point: #ef9a9a;
+    --color-hover: #81c784;
+    --color-grid: #333333;
+    --color-axis: #bdbdbd;
+    --color-header-bg: #0d47a1;
+    --color-header-text: #ffffff;
+  }
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+#app {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+  min-height: 0;
+}
+
+header {
+  background: var(--color-header-bg);
+  color: var(--color-header-text);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+}
+
+header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#controls {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.aircraft-group {
+  flex: 1 1 200px;
+  min-width: 160px;
+  max-width: 360px;
+}
+
+.aircraft-group label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+#aircraft-select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+
+#aircraft-select:focus {
+  border-color: var(--color-polar);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-polar) 20%, transparent);
+}
+
+fieldset {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 8px 6px;
+}
+
+legend {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  padding: 0 2px;
+}
+
+fieldset label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+fieldset input[type="radio"] {
+  cursor: pointer;
+  accent-color: var(--color-polar);
+}
+
+.slider-group {
+  flex: 1 1 180px;
+  min-width: 140px;
+}
+
+.slider-group label {
+  font-size: 12px;
+  color: var(--color-text);
+  white-space: nowrap;
+  display: block;
+}
+
+.slider-hint {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-left: 4px;
+}
+
+#airmass-slider,
+#mc-slider {
+  width: 100%;
+  cursor: pointer;
+  accent-color: var(--color-polar);
+  height: 4px;
+  margin-top: 4px;
+}
+
+#chart-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+#polar-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+  z-index: 10;
+}
+
+#tooltip[hidden] {
+  display: none;
+}
+
+#tip-speed {
+  font-weight: 600;
+  color: var(--color-polar);
+}
+
+#tip-sink {
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 480px) {
+  header h1 {
+    font-size: 15px;
+  }
+
+  #controls {
+    padding: 6px 8px;
+    gap: 8px;
+  }
+
+  .aircraft-group {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  fieldset {
+    padding: 3px 6px 5px;
+  }
+
+  fieldset label {
+    margin-right: 6px;
+    font-size: 12px;
+  }
+
+  .slider-group {
+    flex: 1 1 100%;
+  }
+}

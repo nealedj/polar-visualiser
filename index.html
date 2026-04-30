@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Glider Polar Visualiser</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Glider Polar Visualiser</h1>
+    </header>
+
+    <div id="controls">
+      <div class="control-group aircraft-group">
+        <label for="aircraft-select">Aircraft</label>
+        <select id="aircraft-select" disabled>
+          <option>Loading polars…</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <fieldset>
+          <legend>Speed units</legend>
+          <label><input type="radio" name="speed-unit" value="kts" checked> kts</label>
+          <label><input type="radio" name="speed-unit" value="kmh"> km/h</label>
+          <label><input type="radio" name="speed-unit" value="mph"> mph</label>
+        </fieldset>
+      </div>
+
+      <div class="control-group">
+        <fieldset>
+          <legend>Sink units</legend>
+          <label><input type="radio" name="sink-unit" value="kts" checked> kts</label>
+          <label><input type="radio" name="sink-unit" value="fts"> ft/s</label>
+          <label><input type="radio" name="sink-unit" value="ms"> m/s</label>
+        </fieldset>
+      </div>
+
+      <div class="control-group slider-group">
+        <label for="airmass-slider">
+          Airmass: <span id="airmass-value">0.0</span> <span class="airmass-unit">kts</span>
+          <span class="slider-hint">(+ = lift)</span>
+        </label>
+        <input type="range" id="airmass-slider" min="-10" max="10" step="0.1" value="0">
+      </div>
+
+      <div class="control-group slider-group">
+        <label for="mc-slider">
+          MacCready: <span id="mc-value">0.0</span> <span class="mc-unit">kts</span>
+        </label>
+        <input type="range" id="mc-slider" min="0" max="10" step="0.1" value="0">
+      </div>
+    </div>
+
+    <div id="chart-container">
+      <canvas id="polar-canvas"></canvas>
+      <div id="tooltip" hidden>
+        <div id="tip-speed"></div>
+        <div id="tip-sink"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
