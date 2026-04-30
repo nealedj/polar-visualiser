@@ -474,6 +474,33 @@ function drawMcLine(ranges) {
   ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, labelY);
   ctx.fillText(`Sink: ${snk} ${sinkLabel()}`, labelX, labelY + 14);
   ctx.restore();
+
+  // Cross-country speed: where the MC line crosses y=0 (zero-rate axis).
+  // From rate(v) = mc_disp + slope*v = 0  →  v_cc = -mc_disp / slope
+  // At MC=0 this is 0 (origin); at MC>0 it is a positive speed.
+  const v_cc_disp = Math.abs(slope) > 1e-12 ? -mc_disp / slope : 0;
+  const x_cc = toCanvasX(v_cc_disp, ranges);
+  const y0   = toCanvasY(0, ranges);
+
+  if (x_cc >= left && x_cc <= right && y0 >= top && y0 <= bottom) {
+    ctx.save();
+    // Diamond marker on the zero line
+    ctx.beginPath();
+    ctx.moveTo(x_cc,     y0 - 6);
+    ctx.lineTo(x_cc + 5, y0);
+    ctx.lineTo(x_cc,     y0 + 6);
+    ctx.lineTo(x_cc - 5, y0);
+    ctx.closePath();
+    ctx.fillStyle = C.mc;
+    ctx.fill();
+    // Speed label just above the zero line
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = C.mc;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`${v_cc_disp.toFixed(1)} ${speedLabel()}`, x_cc, y0 - 7);
+    ctx.restore();
+  }
 }
 
 function drawMinSinkMarker(ranges) {
