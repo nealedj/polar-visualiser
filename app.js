@@ -419,10 +419,8 @@ function drawMcLine(ranges) {
   const { v_opt, w_opt } = mc;
   const { left, right, top, bottom } = chartArea();
 
-  // In (speed, rate) display space the MC line passes through:
-  //   anchor: (0, mc_ms_disp) — at zero speed, the thermal climb rate (off left of chart)
-  //   tangent point: (v_opt_disp, w_opt_disp)
-  // Line equation: rate = mc_disp + slope * speed
+  // MC line passes through (v=0, w=mc_disp) and the tangent point.
+  // Line equation in display space: rate(v) = mc_disp + slope * v
   const mc_disp    = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
   const v_opt_disp = convertSpeed(v_opt, state.speedUnit);
   const w_opt_disp = convertRate(w_opt, state.sinkUnit);
@@ -430,19 +428,11 @@ function drawMcLine(ranges) {
   if (Math.abs(v_opt_disp) < 1e-9) return;
   const slope = (w_opt_disp - mc_disp) / v_opt_disp;
 
+  // The true line originates at (v=0, w=mc_disp). v=0 is left of the chart,
+  // so we compute the line's canvas coords for both the left chart boundary
+  // and the right chart boundary, then draw it clipped to the chart area.
   const rate_at_left  = mc_disp + slope * ranges.v_min_disp;
   const rate_at_right = mc_disp + slope * ranges.v_max_disp;
-
-  // Anchor dot on Y axis at mc_disp height (at v=0, outside chart area)
-  const anchorY = toCanvasY(mc_disp, ranges);
-  if (anchorY >= top && anchorY <= bottom) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(left, anchorY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = C.mc;
-    ctx.fill();
-    ctx.restore();
-  }
 
   ctx.save();
   ctx.beginPath();
@@ -467,17 +457,18 @@ function drawMcLine(ranges) {
   ctx.fill();
   ctx.restore();
 
-  // Annotation
+  // Annotation: "Best Glide" at MC=0, "STF" otherwise
+  const label  = state.mc_ms < 1e-9 ? 'Best Glide' : 'STF';
   const spd = v_opt_disp.toFixed(1);
   const snk = Math.abs(w_opt_disp).toFixed(2);
   ctx.save();
   ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.fillStyle = C.mc;
-  const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 80);
+  const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 90);
   const labelY = py - 18;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(`STF: ${spd} ${speedLabel()}`, labelX, labelY);
+  ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, labelY);
   ctx.fillText(`Sink: ${snk} ${sinkLabel()}`, labelX, labelY + 14);
   ctx.restore();
 }
@@ -488,18 +479,42 @@ function drawMinSinkMarker(ranges) {
   if (v_ms_kmh < ranges.v_min_kmh || v_ms_kmh > ranges.v_max_kmh) return;
 
   const w_ms = polarSink(coeffs, v_ms_kmh) + state.airmass_ms;
-  const px = toCanvasX(convertSpeed(v_ms_kmh, state.speedUnit), ranges);
+  const v_ms_disp = convertSpeed(v_ms_kmh, state.speedUnit);
+  const px = toCanvasX(v_ms_disp, ranges);
   const py = toCanvasY(convertRate(w_ms, state.sinkUnit), ranges);
 
   const { left, right, top, bottom } = chartArea();
   if (px < left || px > right || py < top || py > bottom) return;
 
   ctx.save();
+
+  // Faint vertical tick to X axis
+  ctx.strokeStyle = C.minsink;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(px, bottom);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // Circle on the polar curve
   ctx.beginPath();
   ctx.arc(px, py, 4, 0, Math.PI * 2);
   ctx.strokeStyle = C.minsink;
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  // Speed label below the circle
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.fillStyle = C.minsink;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('Min sink', px, py + 7);
+  ctx.fillText(`${v_ms_disp.toFixed(1)} ${speedLabel()}`, px, py + 19);
+
   ctx.restore();
 }
 
