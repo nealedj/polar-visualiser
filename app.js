@@ -96,15 +96,22 @@ function parsePolars(cpp) {
     const nums = m[2].match(/-?[\d]+\.?[\d]*/g);
     if (!nums || nums.length < 12) continue;
 
-    const [empty_mass, max_ballast, v1, w1, v2, w2, v3, w3, wing_area, ref_mass, v_no, max_speed]
+    // Struct order: reference_mass, max_ballast, v1,w1,v2,w2,v3,w3,
+    //               wing_area, v_no_ms (m/s, 0=unknown), contest_handicap, empty_mass
+    const [reference_mass, max_ballast, v1, w1, v2, w2, v3, w3,
+           wing_area, v_no_ms, contest_handicap, empty_mass]
       = nums.map(Number);
 
     // Sanity: speeds positive, sink negative
     if (v1 <= 0 || v2 <= 0 || v3 <= 0) continue;
     if (w1 >= 0 || w2 >= 0 || w3 >= 0) continue;
 
-    results.push({ name, empty_mass, max_ballast, v1, w1, v2, w2, v3, w3,
-                   wing_area, ref_mass, v_no, max_speed });
+    // v_no is stored in m/s; convert to km/h for the chart upper bound.
+    // If unknown (0), extend 50% beyond the last measured point.
+    const v_max_kmh = v_no_ms > 0 ? v_no_ms * 3.6 : v3 * 1.5;
+
+    results.push({ name, reference_mass, max_ballast, v1, w1, v2, w2, v3, w3,
+                   wing_area, v_max_kmh });
   }
 
   results.sort((a, b) => a.name.localeCompare(b.name));
@@ -164,7 +171,7 @@ function applyBallast(coeffs, ref_mass, ballast_kg) {
 
 function updateActiveCoeffs() {
   const entry = state.polars[state.selectedIndex];
-  state.activeCoeffs = applyBallast(state.coeffs, entry.ref_mass, state.ballast_kg);
+  state.activeCoeffs = applyBallast(state.coeffs, entry.reference_mass, state.ballast_kg);
 }
 
 function polarSink(coeffs, v_kmh) {
@@ -206,7 +213,7 @@ function computeRanges(entry, coeffs) {
   // This makes the best-glide line (MC=0) originate from (0,0) at the left axis,
   // and reveals the full left side of the parabola (increasing induced drag below min-sink).
   const v_min_kmh = 0;
-  const v_max_kmh = entry.max_speed;
+  const v_max_kmh = entry.v_max_kmh;
 
   // Find worst (most negative) sink over the displayed speed range.
   // Skip v=0 to avoid the large extrapolated c value dominating; start scan at 5 km/h.
