@@ -42,13 +42,15 @@ const C = {
 const state = {
   polars: [],
   selectedIndex: 0,
-  coeffs: null,       // { a, b, c } — quadratic fit in km/h and m/s
-  airmass_ms: 0,      // m/s, positive = lift
-  mc_ms: 0,           // m/s, MacCready setting (positive)
+  coeffs: null,        // { a, b, c } — quadratic fit at ref_mass (unballasted)
+  activeCoeffs: null,  // coeffs scaled for current ballast
+  ballast_kg: 0,
+  airmass_ms: 0,       // m/s, positive = lift
+  mc_ms: 0,            // m/s, MacCready setting (positive)
   speedUnit: 'kts',
   sinkUnit: 'kts',
-  hoverPoint: null,   // { v_kmh, w_ms } | null
-  ranges: null,       // cached axis ranges
+  hoverPoint: null,    // { v_kmh, w_ms } | null
+  ranges: null,        // cached axis ranges
   canvasW: 0,
   canvasH: 0,
 };
@@ -149,6 +151,20 @@ function fitPolar(entry) {
 
   if (a >= 0) return null;
   return { a, b, c };
+}
+
+// Scale polar coefficients for added ballast (wing-loading scaling).
+// Both axes scale by k = sqrt((ref_mass + ballast) / ref_mass):
+//   a_new = a/k,  b_new = b,  c_new = c*k
+function applyBallast(coeffs, ref_mass, ballast_kg) {
+  if (ballast_kg <= 0 || !ref_mass) return coeffs;
+  const k = Math.sqrt((ref_mass + ballast_kg) / ref_mass);
+  return { a: coeffs.a / k, b: coeffs.b, c: coeffs.c * k };
+}
+
+function updateActiveCoeffs() {
+  const entry = state.polars[state.selectedIndex];
+  state.activeCoeffs = applyBallast(state.coeffs, entry.ref_mass, state.ballast_kg);
 }
 
 function polarSink(coeffs, v_kmh) {
@@ -383,7 +399,7 @@ function drawAxes(ranges) {
 }
 
 function drawPolarCurve(ranges) {
-  const { coeffs } = state;
+  const coeffs = state.activeCoeffs;
   const { left, right, top, bottom } = chartArea();
 
   ctx.save();
@@ -416,7 +432,7 @@ function drawPolarCurve(ranges) {
 }
 
 function drawMcLine(ranges) {
-  const mc = computeMcOptimal(state.coeffs, state.mc_ms, state.airmass_ms);
+  const mc = computeMcOptimal(state.activeCoeffs, state.mc_ms, state.airmass_ms);
   if (!mc) return;
 
   const { v_opt, w_opt } = mc;
@@ -504,7 +520,7 @@ function drawMcLine(ranges) {
 }
 
 function drawMinSinkMarker(ranges) {
-  const { coeffs } = state;
+  const coeffs = state.activeCoeffs;
   const v_ms_kmh = minSinkSpeed(coeffs);
   if (v_ms_kmh < ranges.v_min_kmh || v_ms_kmh > ranges.v_max_kmh) return;
 
@@ -582,12 +598,12 @@ function drawHoverMarker(ranges) {
 // === MAIN REDRAW ===
 
 function redraw() {
-  if (!state.coeffs || state.canvasW === 0) return;
+  if (!state.activeCoeffs || state.canvasW === 0) return;
 
   ctx.clearRect(0, 0, state.canvasW, state.canvasH);
 
   const entry  = state.polars[state.selectedIndex];
-  const ranges = computeRanges(entry, state.coeffs);
+  const ranges = computeRanges(entry, state.activeCoeffs);
   state.ranges = ranges;
 
   drawGrid(ranges);
@@ -629,7 +645,7 @@ function hideTooltip() {
 // === INTERACTION ===
 
 function handlePointer(e) {
-  if (!state.coeffs || !state.ranges) return;
+  if (!state.activeCoeffs || !state.ranges) return;
 
   const rect = canvas.getBoundingClientRect();
   const px = e.clientX - rect.left;
@@ -647,7 +663,7 @@ function handlePointer(e) {
     state.ranges.v_min_kmh,
     Math.min(state.ranges.v_max_kmh, speedDisp / SPEED_UNITS[state.speedUnit].factor)
   );
-  const w_ms = polarSink(state.coeffs, v_kmh) + state.airmass_ms;
+  const w_ms = polarSink(state.activeCoeffs, v_kmh) + state.airmass_ms;
 
   state.hoverPoint = { v_kmh, w_ms };
   redraw();
@@ -706,6 +722,9 @@ function initControls() {
   select.addEventListener('change', () => {
     state.selectedIndex = parseInt(select.value, 10);
     state.coeffs = fitPolar(state.polars[state.selectedIndex]);
+    state.ballast_kg = 0;
+    updateActiveCoeffs();
+    updateBallastSlider();
     state.hoverPoint = null;
     hideTooltip();
     redraw();
@@ -741,8 +760,27 @@ function initControls() {
     redraw();
   });
 
+  document.getElementById('ballast-slider').addEventListener('input', function () {
+    state.ballast_kg = parseInt(this.value, 10);
+    document.getElementById('ballast-value').textContent = state.ballast_kg;
+    updateActiveCoeffs();
+    redraw();
+  });
+
+  updateBallastSlider();
   updateSliderConfigs();
   updateSliderLabels();
+}
+
+function updateBallastSlider() {
+  const entry  = state.polars[state.selectedIndex];
+  const max    = entry.max_ballast || 0;
+  const slider = document.getElementById('ballast-slider');
+  slider.max   = max;
+  slider.value = 0;
+  slider.disabled = max === 0;
+  document.getElementById('ballast-value').textContent = '0';
+  document.getElementById('ballast-max').textContent   = max > 0 ? `/ ${max} kg` : '(none)';
 }
 
 // === INITIALISATION ===
@@ -768,6 +806,7 @@ async function init() {
     const defaultIdx = state.polars.findIndex(p => p.name.startsWith('Discus'));
     state.selectedIndex = defaultIdx >= 0 ? defaultIdx : 0;
     state.coeffs = fitPolar(state.polars[state.selectedIndex]);
+    updateActiveCoeffs();
 
     initControls();
     redraw();
