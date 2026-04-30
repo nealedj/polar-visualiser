@@ -186,31 +186,34 @@ function chartArea() {
 }
 
 function computeRanges(entry, coeffs) {
-  const v_minsink = minSinkSpeed(coeffs);
-  const v_min_kmh = Math.max(40, Math.min(entry.v1 * 0.75, v_minsink * 0.75));
+  // X axis starts at v=0 so the Y axis IS the zero-speed axis.
+  // This makes the best-glide line (MC=0) originate from (0,0) at the left axis,
+  // and reveals the full left side of the parabola (increasing induced drag below min-sink).
+  const v_min_kmh = 0;
   const v_max_kmh = entry.max_speed;
 
-  // Find worst (most negative) sink over the displayed speed range
-  let w_min_ms = 0;
-  for (let v = v_min_kmh; v <= v_max_kmh; v += 2) {
+  // Find worst (most negative) sink over the displayed speed range.
+  // Skip v=0 to avoid the large extrapolated c value dominating; start scan at 5 km/h.
+  let w_min_ms = polarSink(coeffs, v_max_kmh) + state.airmass_ms;
+  for (let v = 5; v <= v_max_kmh; v += 2) {
     const w = polarSink(coeffs, v) + state.airmass_ms;
     if (w < w_min_ms) w_min_ms = w;
   }
 
-  // Y axis bottom: most negative value + 15% padding
+  // Y axis bottom: worst visible sink + 15% padding
   const w_min_disp = convertRate(w_min_ms, state.sinkUnit) * 1.15;
-  // Y axis top: positive region — enough to show 0 clearly and the MC anchor
+  // Y axis top: enough to show 0 clearly and any MC anchor above zero
   const totalNeg = Math.abs(w_min_disp);
   const mc_disp  = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
-  const w_max_disp = Math.max(totalNeg * 0.3, mc_disp + totalNeg * 0.06);
+  const w_max_disp = Math.max(totalNeg * 0.15, mc_disp + totalNeg * 0.06);
 
   return {
     v_min_kmh,
     v_max_kmh,
-    v_min_disp: convertSpeed(v_min_kmh, state.speedUnit),
+    v_min_disp: 0,   // 0 speed is 0 in every unit
     v_max_disp: convertSpeed(v_max_kmh, state.speedUnit),
-    w_min_disp,   // Y bottom (negative)
-    w_max_disp,   // Y top (positive)
+    w_min_disp,
+    w_max_disp,
   };
 }
 
