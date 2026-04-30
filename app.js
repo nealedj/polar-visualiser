@@ -141,7 +141,7 @@ function fitPolar(entry) {
   const b = det3(replaceCol(A, 1, rhs)) / detA;
   const c = det3(replaceCol(A, 2, rhs)) / detA;
 
-  if (a <= 0) return null; // degenerate
+  if (a >= 0) return null; // degenerate — real polars have a < 0 (parabola opens downward)
   return { a, b, c };
 }
 
@@ -150,8 +150,8 @@ function polarSink(coeffs, v_kmh) {
 }
 
 // MacCready optimal speed to fly.
-// Tangent from (v=0, w=mc_ms+airmass_ms) to shifted polar.
-// v_opt = sqrt((c + airmass_ms - mc_ms) / a)
+// Tangent from (v=0, w=mc_ms) to the airmass-shifted polar w_s = w + airmass_ms.
+// v_opt = sqrt((c + airmass_ms - mc_ms) / a)  [a < 0, numerator also negative for valid result]
 function computeMcOptimal(coeffs, mc_ms, airmass_ms) {
   const discriminant = (coeffs.c + airmass_ms - mc_ms) / coeffs.a;
   if (discriminant <= 0) return null;
@@ -395,12 +395,11 @@ function drawMcLine(ranges) {
   const x_opt = convertSink(w_opt, state.sinkUnit);  // positive value
   const y_opt = convertSpeed(v_opt, state.speedUnit);
 
-  // MC line anchor: at v=0, w = mc_ms + airmass_ms (this is typically positive = lift,
-  // so the X-intercept of the line is at negative sink — off chart to the left).
-  // The line passes through (sink = -(mc_ms+airmass_ms)*factor, speed = 0).
-  // We parameterise: speedDisp = slope_disp * (sinkDisp - anchor_sink_disp)
-  // where anchor_sink_disp is the X intercept (where speed = 0).
-  const anchor_sink_disp = -(state.mc_ms + state.airmass_ms) * SINK_UNITS[state.sinkUnit].factor;
+  // MC line anchor: in (v, w) space the line starts at (0, mc_ms) — a positive w value
+  // representing the thermal climb rate. In display space (X = |w|, Y = speed), this maps
+  // to (X = -mc_ms * factor, Y = 0), i.e. off the left edge of the chart.
+  // Airmass shifts the polar curve but does NOT move the anchor point.
+  const anchor_sink_disp = -state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
 
   // Slope in display space
   if (Math.abs(x_opt - anchor_sink_disp) < 1e-9) return;
