@@ -3,7 +3,7 @@
 const POLAR_URL =
   'https://raw.githubusercontent.com/XCSoar/XCSoar/master/src/Polar/PolarStore.cpp';
 
-const MARGIN = { top: 30, right: 24, bottom: 56, left: 70 };
+const MARGIN = { top: 24, right: 30, bottom: 52, left: 72 };
 
 // Conversion factors from internal units (km/h, m/s) to display units
 const SPEED_UNITS = {
@@ -20,12 +20,13 @@ const SINK_UNITS = {
 
 // Resolved once from CSS variables — canvas can't use CSS vars directly
 const C = {
-  polar:  '#1976d2',
-  mc:     '#e53935',
-  hover:  '#2e7d32',
-  grid:   '#e0e0e0',
-  axis:   '#424242',
-  text:   '#212121',
+  polar:   '#1976d2',
+  mc:      '#e53935',
+  hover:   '#2e7d32',
+  grid:    '#e0e0e0',
+  axis:    '#424242',
+  text:    '#212121',
+  zeroline:'#888888',
   minsink: '#9c27b0',
 };
 
@@ -51,9 +52,9 @@ function convertSpeed(v_kmh, unit) {
   return v_kmh * SPEED_UNITS[unit].factor;
 }
 
-// w_ms is negative (sink); returns positive display value
-function convertSink(w_ms, unit) {
-  return Math.abs(w_ms) * SINK_UNITS[unit].factor;
+// Signed vertical rate: negative = sink, positive = lift/climb
+function convertRate(w_ms, unit) {
+  return w_ms * SINK_UNITS[unit].factor;
 }
 
 function speedLabel() { return SPEED_UNITS[state.speedUnit].label; }
@@ -73,12 +74,7 @@ async function fetchPolars() {
 function parsePolars(cpp) {
   const results = [];
 
-  // Match each { "Name" [optional /* comment */], num, num, ...(12 numbers) }
-  const ENTRY_RE =
-    /\{\s*"([^"]+)"\s*(?:\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/)?\s*(?:,\s*(-?[\d.]+)){12}\s*\}/g;
-
-  // The above won't capture each number separately in all JS engines due to repeated group capture.
-  // Use a two-step approach: first find the whole entry, then extract numbers.
+  // Match each { "Name" [optional /* comment */], num x12 }
   const BLOCK_RE =
     /\{\s*"([^"]+)"\s*(?:\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/)?\s*,([^}]+)\}/g;
 
@@ -91,7 +87,7 @@ function parsePolars(cpp) {
     const [empty_mass, max_ballast, v1, w1, v2, w2, v3, w3, wing_area, ref_mass, v_no, max_speed]
       = nums.map(Number);
 
-    // Sanity: speeds must be positive and in realistic range, sink must be negative
+    // Sanity: speeds positive, sink negative
     if (v1 <= 0 || v2 <= 0 || v3 <= 0) continue;
     if (w1 >= 0 || w2 >= 0 || w3 >= 0) continue;
 
@@ -101,7 +97,6 @@ function parsePolars(cpp) {
 
   results.sort((a, b) => a.name.localeCompare(b.name));
 
-  // Deduplicate by name (keep first occurrence after sort)
   const seen = new Set();
   return results.filter(p => {
     if (seen.has(p.name)) return false;
@@ -112,7 +107,8 @@ function parsePolars(cpp) {
 
 // === POLAR MATH ===
 
-// Fit quadratic w = a*v^2 + b*v + c through 3 points using Cramer's rule
+// Fit quadratic w = a*v^2 + b*v + c through 3 points using Cramer's rule.
+// For real polars a < 0 (parabola opens downward — sink worsens at both speed extremes).
 function fitPolar(entry) {
   const { v1, w1, v2, w2, v3, w3 } = entry;
 
@@ -141,7 +137,7 @@ function fitPolar(entry) {
   const b = det3(replaceCol(A, 1, rhs)) / detA;
   const c = det3(replaceCol(A, 2, rhs)) / detA;
 
-  if (a >= 0) return null; // degenerate — real polars have a < 0 (parabola opens downward)
+  if (a >= 0) return null;
   return { a, b, c };
 }
 
@@ -149,9 +145,8 @@ function polarSink(coeffs, v_kmh) {
   return coeffs.a * v_kmh * v_kmh + coeffs.b * v_kmh + coeffs.c;
 }
 
-// MacCready optimal speed to fly.
-// Tangent from (v=0, w=mc_ms) to the airmass-shifted polar w_s = w + airmass_ms.
-// v_opt = sqrt((c + airmass_ms - mc_ms) / a)  [a < 0, numerator also negative for valid result]
+// MacCready optimal speed: tangent from (v=0, w=mc_ms) to the shifted polar.
+// v_opt = sqrt((c + airmass_ms - mc_ms) / a)
 function computeMcOptimal(coeffs, mc_ms, airmass_ms) {
   const discriminant = (coeffs.c + airmass_ms - mc_ms) / coeffs.a;
   if (discriminant <= 0) return null;
@@ -162,12 +157,14 @@ function computeMcOptimal(coeffs, mc_ms, airmass_ms) {
   return { v_opt, w_opt };
 }
 
-// Min-sink speed: dw/dv = 0 → v = -b/(2a)
+// Min-sink speed: vertex of parabola at dw/dv = 0 → v = -b/(2a)
 function minSinkSpeed(coeffs) {
   return -coeffs.b / (2 * coeffs.a);
 }
 
 // === CHART GEOMETRY ===
+// X axis = speed (left → right, increasing)
+// Y axis = vertical rate (bottom → top, negative sink below 0, positive lift above 0)
 
 function chartArea() {
   return {
@@ -180,44 +177,51 @@ function chartArea() {
 
 function computeRanges(entry, coeffs) {
   const v_min_kmh = entry.v1 * 0.85;
-  const v_max_kmh = Math.min(entry.max_speed, entry.v_no * 1.05);
+  const v_max_kmh = entry.max_speed;
 
-  let maxSink_ms = 0;
+  // Find worst (most negative) sink over the displayed speed range
+  let w_min_ms = 0;
   for (let v = v_min_kmh; v <= v_max_kmh; v += 2) {
     const w = polarSink(coeffs, v) + state.airmass_ms;
-    if (w < maxSink_ms) maxSink_ms = w; // w negative, more negative = more sink
+    if (w < w_min_ms) w_min_ms = w;
   }
 
-  const sinkExtent = Math.abs(maxSink_ms) * 1.2;
+  // Y axis bottom: most negative value + 15% padding
+  const w_min_disp = convertRate(w_min_ms, state.sinkUnit) * 1.15;
+  // Y axis top: positive region — enough to show 0 clearly and the MC anchor
+  const totalNeg = Math.abs(w_min_disp);
+  const mc_disp  = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
+  const w_max_disp = Math.max(totalNeg * 0.3, mc_disp + totalNeg * 0.06);
 
   return {
     v_min_kmh,
     v_max_kmh,
-    sink_max_ms: sinkExtent, // positive — the maximum magnitude of sink shown
-    v_min_disp:  convertSpeed(v_min_kmh, state.speedUnit),
-    v_max_disp:  convertSpeed(v_max_kmh, state.speedUnit),
-    sink_min_disp: 0,
-    sink_max_disp: sinkExtent * SINK_UNITS[state.sinkUnit].factor,
+    v_min_disp: convertSpeed(v_min_kmh, state.speedUnit),
+    v_max_disp: convertSpeed(v_max_kmh, state.speedUnit),
+    w_min_disp,   // Y bottom (negative)
+    w_max_disp,   // Y top (positive)
   };
 }
 
-function toCanvasX(sinkDisp, ranges) {
+// Speed → canvas X
+function toCanvasX(speedDisp, ranges) {
   const { left, right } = chartArea();
-  return left + (sinkDisp - ranges.sink_min_disp) /
-    (ranges.sink_max_disp - ranges.sink_min_disp) * (right - left);
+  return left + (speedDisp - ranges.v_min_disp) /
+    (ranges.v_max_disp - ranges.v_min_disp) * (right - left);
 }
 
-function toCanvasY(speedDisp, ranges) {
+// Signed vertical rate → canvas Y (positive rate = up = lower pixel Y)
+function toCanvasY(rateDisp, ranges) {
   const { top, bottom } = chartArea();
-  // speed increases upward → high speed = low pixel Y
-  return bottom - (speedDisp - ranges.v_min_disp) /
-    (ranges.v_max_disp - ranges.v_min_disp) * (bottom - top);
+  return bottom - (rateDisp - ranges.w_min_disp) /
+    (ranges.w_max_disp - ranges.w_min_disp) * (bottom - top);
 }
 
-function fromCanvasY(py, ranges) {
-  const { top, bottom } = chartArea();
-  return ranges.v_min_disp + (bottom - py) /
-    (bottom - top) * (ranges.v_max_disp - ranges.v_min_disp);
+// Canvas X → speed in display units
+function fromCanvasX(px, ranges) {
+  const { left, right } = chartArea();
+  return ranges.v_min_disp + (px - left) /
+    (right - left) * (ranges.v_max_disp - ranges.v_min_disp);
 }
 
 // === CANVAS SETUP ===
@@ -253,55 +257,61 @@ function resolveColours() {
 
 function niceTickInterval(range, targetTicks) {
   const rough = range / targetTicks;
-  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const mag = Math.pow(10, Math.floor(Math.log10(Math.abs(rough))));
   const normalised = rough / mag;
   let nice;
-  if (normalised < 1.5) nice = 1;
+  if (normalised < 1.5)      nice = 1;
   else if (normalised < 3.5) nice = 2;
   else if (normalised < 7.5) nice = 5;
-  else nice = 10;
+  else                       nice = 10;
   return nice * mag;
 }
 
 function drawGrid(ranges) {
   const { left, right, top, bottom } = chartArea();
   ctx.save();
+  ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  // --- Vertical grid lines: speed ticks ---
+  const speedTick = niceTickInterval(ranges.v_max_disp - ranges.v_min_disp, 6);
+  const speedStart = Math.ceil(ranges.v_min_disp / speedTick) * speedTick;
+
   ctx.strokeStyle = C.grid;
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 4]);
-  ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.fillStyle = C.axis;
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-
-  // Horizontal lines — speed axis (Y)
-  const speedRange = ranges.v_max_disp - ranges.v_min_disp;
-  const speedTick = niceTickInterval(speedRange, 6);
-  const speedStart = Math.ceil(ranges.v_min_disp / speedTick) * speedTick;
-  for (let v = speedStart; v <= ranges.v_max_disp + speedTick * 0.01; v += speedTick) {
-    const py = toCanvasY(v, ranges);
-    if (py < top - 1 || py > bottom + 1) continue;
-    ctx.beginPath();
-    ctx.moveTo(left, py);
-    ctx.lineTo(right, py);
-    ctx.stroke();
-    ctx.fillText(v.toFixed(speedTick < 1 ? 1 : 0), left - 6, py);
-  }
-
-  // Vertical lines — sink axis (X)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  const sinkRange = ranges.sink_max_disp - ranges.sink_min_disp;
-  const sinkTick = niceTickInterval(sinkRange, 6);
-  const sinkStart = Math.ceil(ranges.sink_min_disp / sinkTick) * sinkTick;
-  for (let s = sinkStart; s <= ranges.sink_max_disp + sinkTick * 0.01; s += sinkTick) {
-    const px = toCanvasX(s, ranges);
+
+  for (let v = speedStart; v <= ranges.v_max_disp + speedTick * 0.01; v += speedTick) {
+    const px = toCanvasX(v, ranges);
     if (px < left - 1 || px > right + 1) continue;
     ctx.beginPath();
     ctx.moveTo(px, top);
     ctx.lineTo(px, bottom);
     ctx.stroke();
-    ctx.fillText(s.toFixed(sinkTick < 0.1 ? 2 : sinkTick < 1 ? 1 : 0), px, bottom + 4);
+    ctx.fillText(v.toFixed(speedTick < 1 ? 1 : 0), px, bottom + 4);
+  }
+
+  // --- Horizontal grid lines: rate ticks ---
+  const rateRange = ranges.w_max_disp - ranges.w_min_disp;
+  const rateTick  = niceTickInterval(rateRange, 6);
+  const rateStart = Math.ceil(ranges.w_min_disp / rateTick) * rateTick;
+
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  for (let w = rateStart; w <= ranges.w_max_disp + rateTick * 0.01; w += rateTick) {
+    if (Math.abs(w) < rateTick * 0.01) continue; // skip 0 — drawn separately
+    const py = toCanvasY(w, ranges);
+    if (py < top - 1 || py > bottom + 1) continue;
+    ctx.strokeStyle = C.grid;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(left, py);
+    ctx.lineTo(right, py);
+    ctx.stroke();
+    ctx.fillText(w.toFixed(rateTick < 0.1 ? 2 : rateTick < 1 ? 1 : 0), left - 6, py);
   }
 
   ctx.restore();
@@ -310,37 +320,49 @@ function drawGrid(ranges) {
 function drawAxes(ranges) {
   const { left, right, top, bottom } = chartArea();
   ctx.save();
+  ctx.setLineDash([]);
+  ctx.fillStyle = C.axis;
+  ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  // Border axes
   ctx.strokeStyle = C.axis;
   ctx.lineWidth = 1.5;
-  ctx.setLineDash([]);
-
-  // X axis (bottom)
-  ctx.beginPath();
-  ctx.moveTo(left, bottom);
-  ctx.lineTo(right, bottom);
-  ctx.stroke();
-
-  // Y axis (left)
   ctx.beginPath();
   ctx.moveTo(left, top);
   ctx.lineTo(left, bottom);
+  ctx.lineTo(right, bottom);
   ctx.stroke();
 
-  ctx.fillStyle = C.axis;
+  // Zero-rate line — prominent horizontal line at w=0
+  const py0 = toCanvasY(0, ranges);
+  if (py0 >= top && py0 <= bottom) {
+    ctx.strokeStyle = C.zeroline;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(left, py0);
+    ctx.lineTo(right, py0);
+    ctx.stroke();
+    // "0" label
+    ctx.fillStyle = C.zeroline;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('0', left - 6, py0);
+  }
 
-  // X axis label
-  ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+  // X axis label: Speed
+  ctx.fillStyle = C.axis;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(`Sink Rate (${sinkLabel()})`, left + (right - left) / 2, state.canvasH - 4);
+  ctx.fillText(`Speed (${speedLabel()})`, left + (right - left) / 2, state.canvasH - 4);
 
-  // Y axis label (rotated)
+  // Y axis label: Climb / Sink Rate (rotated)
   ctx.save();
-  ctx.translate(12, top + (bottom - top) / 2);
+  ctx.translate(13, top + (bottom - top) / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(`Speed (${speedLabel()})`, 0, 0);
+  ctx.fillText(`Climb / Sink Rate (${sinkLabel()})`, 0, 0);
   ctx.restore();
 
   ctx.restore();
@@ -351,7 +373,6 @@ function drawPolarCurve(ranges) {
   const { left, right, top, bottom } = chartArea();
 
   ctx.save();
-  // Clip to chart area to prevent overdraw outside axes
   ctx.beginPath();
   ctx.rect(left, top, right - left, bottom - top);
   ctx.clip();
@@ -364,23 +385,19 @@ function drawPolarCurve(ranges) {
 
   const steps = 300;
   const dv = (ranges.v_max_kmh - ranges.v_min_kmh) / steps;
-  let first = true;
+  let started = false;
 
   for (let i = 0; i <= steps; i++) {
     const v_kmh = ranges.v_min_kmh + i * dv;
     const w_ms  = polarSink(coeffs, v_kmh) + state.airmass_ms;
 
-    const sinkDisp  = convertSink(w_ms, state.sinkUnit);
-    const speedDisp = convertSpeed(v_kmh, state.speedUnit);
+    const px = toCanvasX(convertSpeed(v_kmh, state.speedUnit), ranges);
+    const py = toCanvasY(convertRate(w_ms,   state.sinkUnit),  ranges);
 
-    const px = toCanvasX(sinkDisp, ranges);
-    const py = toCanvasY(speedDisp, ranges);
-
-    if (first) { ctx.moveTo(px, py); first = false; }
+    if (!started) { ctx.moveTo(px, py); started = true; }
     else ctx.lineTo(px, py);
   }
   ctx.stroke();
-
   ctx.restore();
 }
 
@@ -391,25 +408,19 @@ function drawMcLine(ranges) {
   const { v_opt, w_opt } = mc;
   const { left, right, top, bottom } = chartArea();
 
-  // Optimal point in display units
-  const x_opt = convertSink(w_opt, state.sinkUnit);  // positive value
-  const y_opt = convertSpeed(v_opt, state.speedUnit);
+  // In (speed, rate) display space the MC line passes through:
+  //   anchor: (0, mc_ms_disp) — at zero speed, the thermal climb rate (off left of chart)
+  //   tangent point: (v_opt_disp, w_opt_disp)
+  // Line equation: rate = mc_disp + slope * speed
+  const mc_disp    = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
+  const v_opt_disp = convertSpeed(v_opt, state.speedUnit);
+  const w_opt_disp = convertRate(w_opt, state.sinkUnit);
 
-  // MC line anchor: in (v, w) space the line starts at (0, mc_ms) — a positive w value
-  // representing the thermal climb rate. In display space (X = |w|, Y = speed), this maps
-  // to (X = -mc_ms * factor, Y = 0), i.e. off the left edge of the chart.
-  // Airmass shifts the polar curve but does NOT move the anchor point.
-  const anchor_sink_disp = -state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
+  if (Math.abs(v_opt_disp) < 1e-9) return;
+  const slope = (w_opt_disp - mc_disp) / v_opt_disp;
 
-  // Slope in display space
-  if (Math.abs(x_opt - anchor_sink_disp) < 1e-9) return;
-  const slope = (y_opt - 0) / (x_opt - anchor_sink_disp);
-
-  // Compute y at left and right chart edges
-  const sink_at_left  = ranges.sink_min_disp;
-  const sink_at_right = ranges.sink_max_disp;
-  const spd_at_left   = slope * (sink_at_left  - anchor_sink_disp);
-  const spd_at_right  = slope * (sink_at_right - anchor_sink_disp);
+  const rate_at_left  = mc_disp + slope * ranges.v_min_disp;
+  const rate_at_right = mc_disp + slope * ranges.v_max_disp;
 
   ctx.save();
   ctx.beginPath();
@@ -420,32 +431,30 @@ function drawMcLine(ranges) {
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 5]);
   ctx.beginPath();
-  ctx.moveTo(toCanvasX(sink_at_left,  ranges), toCanvasY(spd_at_left,  ranges));
-  ctx.lineTo(toCanvasX(sink_at_right, ranges), toCanvasY(spd_at_right, ranges));
+  ctx.moveTo(toCanvasX(ranges.v_min_disp, ranges), toCanvasY(rate_at_left,  ranges));
+  ctx.lineTo(toCanvasX(ranges.v_max_disp, ranges), toCanvasY(rate_at_right, ranges));
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Tangent point marker
-  const px = toCanvasX(x_opt, ranges);
-  const py = toCanvasY(y_opt, ranges);
+  // Tangent point dot
+  const px = toCanvasX(v_opt_disp, ranges);
+  const py = toCanvasY(w_opt_disp, ranges);
   ctx.beginPath();
   ctx.arc(px, py, 5, 0, Math.PI * 2);
   ctx.fillStyle = C.mc;
   ctx.fill();
-
   ctx.restore();
 
-  // Annotation label beside the tangent point
-  const spd = convertSpeed(v_opt, state.speedUnit).toFixed(1);
-  const snk = convertSink(w_opt, state.sinkUnit).toFixed(2);
+  // Annotation
+  const spd = v_opt_disp.toFixed(1);
+  const snk = Math.abs(w_opt_disp).toFixed(2);
   ctx.save();
   ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.fillStyle = C.mc;
-  ctx.textBaseline = 'middle';
-  // Position label to the right of the point, or left if near right edge
-  const labelX = px + 8;
-  const labelY = py - 12;
+  const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 80);
+  const labelY = py - 18;
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillText(`STF: ${spd} ${speedLabel()}`, labelX, labelY);
   ctx.fillText(`Sink: ${snk} ${sinkLabel()}`, labelX, labelY + 14);
   ctx.restore();
@@ -457,8 +466,8 @@ function drawMinSinkMarker(ranges) {
   if (v_ms_kmh < ranges.v_min_kmh || v_ms_kmh > ranges.v_max_kmh) return;
 
   const w_ms = polarSink(coeffs, v_ms_kmh) + state.airmass_ms;
-  const px = toCanvasX(convertSink(w_ms, state.sinkUnit), ranges);
-  const py = toCanvasY(convertSpeed(v_ms_kmh, state.speedUnit), ranges);
+  const px = toCanvasX(convertSpeed(v_ms_kmh, state.speedUnit), ranges);
+  const py = toCanvasY(convertRate(w_ms, state.sinkUnit), ranges);
 
   const { left, right, top, bottom } = chartArea();
   if (px < left || px > right || py < top || py > bottom) return;
@@ -474,28 +483,28 @@ function drawMinSinkMarker(ranges) {
 
 function drawHoverMarker(ranges) {
   const { v_kmh, w_ms } = state.hoverPoint;
-  const px = toCanvasX(convertSink(w_ms, state.sinkUnit), ranges);
-  const py = toCanvasY(convertSpeed(v_kmh, state.speedUnit), ranges);
+  const px = toCanvasX(convertSpeed(v_kmh, state.speedUnit), ranges);
+  const py = toCanvasY(convertRate(w_ms, state.sinkUnit), ranges);
 
   const { left, right, top, bottom } = chartArea();
   if (px < left || px > right || py < top || py > bottom) return;
 
   ctx.save();
-  // Crosshair lines
   ctx.strokeStyle = C.hover;
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 3]);
   ctx.globalAlpha = 0.6;
   ctx.beginPath();
-  ctx.moveTo(left, py);
-  ctx.lineTo(px, py);
-  ctx.moveTo(px, py);
+  // Vertical line at hover speed
+  ctx.moveTo(px, top);
   ctx.lineTo(px, bottom);
+  // Horizontal line at hover rate
+  ctx.moveTo(left, py);
+  ctx.lineTo(right, py);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 
-  // Point circle
   ctx.beginPath();
   ctx.arc(px, py, 5, 0, Math.PI * 2);
   ctx.fillStyle = C.hover;
@@ -510,7 +519,7 @@ function redraw() {
 
   ctx.clearRect(0, 0, state.canvasW, state.canvasH);
 
-  const entry = state.polars[state.selectedIndex];
+  const entry  = state.polars[state.selectedIndex];
   const ranges = computeRanges(entry, state.coeffs);
   state.ranges = ranges;
 
@@ -524,20 +533,21 @@ function redraw() {
 
 // === TOOLTIP ===
 
-const tooltip = document.getElementById('tooltip');
+const tooltip  = document.getElementById('tooltip');
 const tipSpeed = document.getElementById('tip-speed');
 const tipSink  = document.getElementById('tip-sink');
 
 function showTooltip(px, py, v_kmh, w_ms) {
+  const rateDisp = convertRate(w_ms, state.sinkUnit);
+  const sign = rateDisp >= 0 ? '+' : '';
   tipSpeed.textContent = `${convertSpeed(v_kmh, state.speedUnit).toFixed(1)} ${speedLabel()}`;
-  tipSink.textContent  = `Sink: ${convertSink(w_ms, state.sinkUnit).toFixed(2)} ${sinkLabel()}`;
+  tipSink.textContent  = `${sign}${rateDisp.toFixed(2)} ${sinkLabel()}`;
 
-  // Offset above and to the right of pointer; flip if near right/top edge
   const container = document.getElementById('chart-container');
   const cw = container.clientWidth;
   let lx = px + 14;
   let ly = py - 64;
-  if (lx + 120 > cw) lx = px - 130;
+  if (lx + 130 > cw) lx = px - 140;
   if (ly < 4) ly = py + 10;
 
   tooltip.style.left = `${lx}px`;
@@ -564,12 +574,11 @@ function handlePointer(e) {
     return;
   }
 
-  // Convert pointer Y to speed, clamp to range, then compute w at that speed
-  const speedDisp  = fromCanvasY(py, state.ranges);
+  // Convert pointer X → speed → find sink on polar at that speed
+  const speedDisp = fromCanvasX(px, state.ranges);
   const v_kmh = Math.max(
     state.ranges.v_min_kmh,
-    Math.min(state.ranges.v_max_kmh,
-             speedDisp / SPEED_UNITS[state.speedUnit].factor)
+    Math.min(state.ranges.v_max_kmh, speedDisp / SPEED_UNITS[state.speedUnit].factor)
   );
   const w_ms = polarSink(state.coeffs, v_kmh) + state.airmass_ms;
 
@@ -590,12 +599,11 @@ canvas.addEventListener('pointerleave', () => {
 
 function updateSliderLabels() {
   const airmassKts = parseFloat(document.getElementById('airmass-slider').value);
-  const mcKts = parseFloat(document.getElementById('mc-slider').value);
+  const mcKts      = parseFloat(document.getElementById('mc-slider').value);
 
-  // Show slider values in the selected sink unit
   const airmassMs = ktsToMs(airmassKts);
-  const mcMs = ktsToMs(mcKts);
-  const factor = SINK_UNITS[state.sinkUnit].factor;
+  const mcMs      = ktsToMs(mcKts);
+  const factor    = SINK_UNITS[state.sinkUnit].factor;
 
   document.getElementById('airmass-value').textContent =
     (airmassMs >= 0 ? '+' : '') + (airmassMs * factor).toFixed(2);
@@ -614,14 +622,11 @@ function initControls() {
     .map((p, i) => `<option value="${i}">${p.name}</option>`)
     .join('');
   select.removeAttribute('disabled');
-
-  // Restore default selection
   select.value = String(state.selectedIndex);
 
   select.addEventListener('change', () => {
     state.selectedIndex = parseInt(select.value, 10);
-    const entry = state.polars[state.selectedIndex];
-    state.coeffs = fitPolar(entry);
+    state.coeffs = fitPolar(state.polars[state.selectedIndex]);
     state.hoverPoint = null;
     hideTooltip();
     redraw();
@@ -644,16 +649,14 @@ function initControls() {
     });
   });
 
-  const airmassSlider = document.getElementById('airmass-slider');
-  airmassSlider.addEventListener('input', () => {
-    state.airmass_ms = ktsToMs(parseFloat(airmassSlider.value));
+  document.getElementById('airmass-slider').addEventListener('input', function () {
+    state.airmass_ms = ktsToMs(parseFloat(this.value));
     updateSliderLabels();
     redraw();
   });
 
-  const mcSlider = document.getElementById('mc-slider');
-  mcSlider.addEventListener('input', () => {
-    state.mc_ms = ktsToMs(parseFloat(mcSlider.value));
+  document.getElementById('mc-slider').addEventListener('input', function () {
+    state.mc_ms = ktsToMs(parseFloat(this.value));
     updateSliderLabels();
     redraw();
   });
@@ -672,22 +675,15 @@ async function init() {
   resolveColours();
   resizeCanvas();
 
-  window.addEventListener('resize', debounce(() => {
-    resizeCanvas();
-    redraw();
-  }, 150));
-
-  // Also re-resolve colours if system theme changes
+  window.addEventListener('resize', debounce(() => { resizeCanvas(); redraw(); }, 150));
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    resolveColours();
-    redraw();
+    resolveColours(); redraw();
   });
 
   try {
     state.polars = await fetchPolars();
     if (state.polars.length === 0) throw new Error('No polars parsed');
 
-    // Default to Discus or first entry
     const defaultIdx = state.polars.findIndex(p => p.name.startsWith('Discus'));
     state.selectedIndex = defaultIdx >= 0 ? defaultIdx : 0;
     state.coeffs = fitPolar(state.polars[state.selectedIndex]);
