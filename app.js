@@ -13,9 +13,16 @@ const SPEED_UNITS = {
 };
 
 const SINK_UNITS = {
-  kts: { label: 'kts',  factor: 1 / 0.51444 },
-  fts: { label: 'ft/s', factor: 1 / 0.3048 },
-  ms:  { label: 'm/s',  factor: 1 },
+  kts: { label: 'kts',   factor: 1 / 0.51444 },
+  fts: { label: 'ft/min', factor: 60 / 0.3048 },
+  ms:  { label: 'm/s',   factor: 1 },
+};
+
+// Slider config per sink unit: step, airmass range, MacCready max
+const SINK_SLIDER = {
+  kts: { step: 0.5,  airmassMin: -10,   airmassMax: 10,   mcMax: 10,   decimals: 1 },
+  fts: { step: 100,  airmassMin: -2000,  airmassMax: 2000, mcMax: 2000, decimals: 0 },
+  ms:  { step: 0.2,  airmassMin: -5.5,   airmassMax: 5.5,  mcMax: 5.5,  decimals: 1 },
 };
 
 // Resolved once from CSS variables — canvas can't use CSS vars directly
@@ -61,6 +68,9 @@ function speedLabel() { return SPEED_UNITS[state.speedUnit].label; }
 function sinkLabel()  { return SINK_UNITS[state.sinkUnit].label; }
 
 function ktsToMs(kts) { return kts * 0.51444; }
+
+function msToSinkDisp(ms) { return ms * SINK_UNITS[state.sinkUnit].factor; }
+function sinkDispToMs(val) { return val / SINK_UNITS[state.sinkUnit].factor; }
 
 // === DATA FETCHING & PARSING ===
 
@@ -176,7 +186,8 @@ function chartArea() {
 }
 
 function computeRanges(entry, coeffs) {
-  const v_min_kmh = entry.v1 * 0.85;
+  const v_minsink = minSinkSpeed(coeffs);
+  const v_min_kmh = Math.max(40, Math.min(entry.v1 * 0.75, v_minsink * 0.75));
   const v_max_kmh = entry.max_speed;
 
   // Find worst (most negative) sink over the displayed speed range
@@ -422,6 +433,17 @@ function drawMcLine(ranges) {
   const rate_at_left  = mc_disp + slope * ranges.v_min_disp;
   const rate_at_right = mc_disp + slope * ranges.v_max_disp;
 
+  // Anchor dot on Y axis at mc_disp height (at v=0, outside chart area)
+  const anchorY = toCanvasY(mc_disp, ranges);
+  if (anchorY >= top && anchorY <= bottom) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(left, anchorY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = C.mc;
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(left, top, right - left, bottom - top);
@@ -598,21 +620,33 @@ canvas.addEventListener('pointerleave', () => {
 // === UI CONTROLS ===
 
 function updateSliderLabels() {
-  const airmassKts = parseFloat(document.getElementById('airmass-slider').value);
-  const mcKts      = parseFloat(document.getElementById('mc-slider').value);
-
-  const airmassMs = ktsToMs(airmassKts);
-  const mcMs      = ktsToMs(mcKts);
-  const factor    = SINK_UNITS[state.sinkUnit].factor;
+  const airmassDisp = parseFloat(document.getElementById('airmass-slider').value);
+  const mcDisp      = parseFloat(document.getElementById('mc-slider').value);
+  const dec = SINK_SLIDER[state.sinkUnit].decimals;
 
   document.getElementById('airmass-value').textContent =
-    (airmassMs >= 0 ? '+' : '') + (airmassMs * factor).toFixed(2);
-  document.getElementById('mc-value').textContent =
-    (mcMs * factor).toFixed(2);
+    (airmassDisp >= 0 ? '+' : '') + airmassDisp.toFixed(dec);
+  document.getElementById('mc-value').textContent = mcDisp.toFixed(dec);
 
   document.querySelectorAll('.airmass-unit, .mc-unit').forEach(el => {
     el.textContent = sinkLabel();
   });
+}
+
+function updateSliderConfigs() {
+  const cfg = SINK_SLIDER[state.sinkUnit];
+  const airmassSlider = document.getElementById('airmass-slider');
+  const mcSlider = document.getElementById('mc-slider');
+
+  airmassSlider.min   = cfg.airmassMin;
+  airmassSlider.max   = cfg.airmassMax;
+  airmassSlider.step  = cfg.step;
+  airmassSlider.value = msToSinkDisp(state.airmass_ms);
+
+  mcSlider.min   = 0;
+  mcSlider.max   = cfg.mcMax;
+  mcSlider.step  = cfg.step;
+  mcSlider.value = msToSinkDisp(state.mc_ms);
 }
 
 function initControls() {
@@ -644,23 +678,25 @@ function initControls() {
     r.addEventListener('change', () => {
       if (!r.checked) return;
       state.sinkUnit = r.value;
+      updateSliderConfigs();
       updateSliderLabels();
       redraw();
     });
   });
 
   document.getElementById('airmass-slider').addEventListener('input', function () {
-    state.airmass_ms = ktsToMs(parseFloat(this.value));
+    state.airmass_ms = sinkDispToMs(parseFloat(this.value));
     updateSliderLabels();
     redraw();
   });
 
   document.getElementById('mc-slider').addEventListener('input', function () {
-    state.mc_ms = ktsToMs(parseFloat(this.value));
+    state.mc_ms = sinkDispToMs(parseFloat(this.value));
     updateSliderLabels();
     redraw();
   });
 
+  updateSliderConfigs();
   updateSliderLabels();
 }
 
