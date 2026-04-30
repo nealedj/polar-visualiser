@@ -514,7 +514,11 @@ function drawMcLine(ranges) {
     ctx.fillStyle = C.mc;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${v_cc_disp.toFixed(1)} ${speedLabel()}`, x_cc, y0 - 7);
+    const v_cc_kmh = v_cc_disp / SPEED_UNITS[state.speedUnit].factor;
+    const line1 = state.speedUnit === 'kmh'
+      ? `${v_cc_kmh.toFixed(0)} km/h`
+      : `${v_cc_disp.toFixed(1)} ${speedLabel()} (${v_cc_kmh.toFixed(0)} km/h)`;
+    ctx.fillText(line1, x_cc, y0 - 7);
     ctx.restore();
   }
 }
