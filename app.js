@@ -531,7 +531,7 @@ function drawStallMarker(ranges) {
   ctx.restore();
 }
 
-function drawMcLine(ranges, coeffs, color) {
+function drawMcLine(ranges, coeffs, color, labelBelow = false) {
   const mc = computeMcOptimal(coeffs, state.mc_ms, state.airmass_ms);
   if (!mc) return;
 
@@ -583,7 +583,7 @@ function drawMcLine(ranges, coeffs, color) {
   ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.fillStyle = color;
   const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 90);
-  const labelY = py - 10;
+  const labelY = labelBelow ? py + 8 : py - 10;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, labelY);
@@ -728,7 +728,7 @@ function redraw() {
 
   drawMcLine(ranges, state.activeCoeffs, C.mc);
   if (state.compareMode && state.compareActiveCoeffs) {
-    drawMcLine(ranges, state.compareActiveCoeffs, C.compare);
+    drawMcLine(ranges, state.compareActiveCoeffs, C.compare, true);
   }
   if (!state.compareMode) drawMinSinkMarker(ranges);
   if (state.hoverPoint) drawHoverMarker(ranges);
