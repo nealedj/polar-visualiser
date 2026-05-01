@@ -176,16 +176,16 @@ function updateActiveCoeffs() {
 }
 
 // Estimate stall speed in km/h using wing loading formula, or fallback to v1 × 0.55.
-// CLmax ≈ 1.5 is a typical clean-glider value at 1g.
+// CLmax ≈ 2.0 matches published stall speeds for typical competition gliders.
 function computeStallSpeed(entry, ballast_kg) {
-  const g = 9.81, rho = 1.225, CLmax = 1.5;
+  const g = 9.81, rho = 1.225, CLmax = 2.0;
   const mass = entry.reference_mass + ballast_kg;
   if (entry.wing_area > 0) {
     return Math.sqrt(2 * mass * g / (rho * entry.wing_area * CLmax)) * 3.6;
   }
-  // No wing area recorded: ~55% of first measured speed, scaled for mass
+  // No wing area recorded: ~48% of first measured speed, scaled for mass
   const k = Math.sqrt(mass / entry.reference_mass);
-  return entry.v1 * 0.55 * k;
+  return entry.v1 * 0.48 * k;
 }
 
 function polarSink(coeffs, v_kmh) {
