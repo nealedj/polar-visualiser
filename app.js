@@ -35,6 +35,7 @@ const C = {
   text:    '#212121',
   zeroline:'#888888',
   minsink: '#9c27b0',
+  stall:   '#e65100',
 };
 
 // === APPLICATION STATE ===
@@ -174,6 +175,19 @@ function updateActiveCoeffs() {
   state.activeCoeffs = applyBallast(state.coeffs, entry.reference_mass, state.ballast_kg);
 }
 
+// Estimate stall speed in km/h using wing loading formula, or fallback to v1 × 0.55.
+// CLmax ≈ 1.5 is a typical clean-glider value at 1g.
+function computeStallSpeed(entry, ballast_kg) {
+  const g = 9.81, rho = 1.225, CLmax = 1.5;
+  const mass = entry.reference_mass + ballast_kg;
+  if (entry.wing_area > 0) {
+    return Math.sqrt(2 * mass * g / (rho * entry.wing_area * CLmax)) * 3.6;
+  }
+  // No wing area recorded: ~55% of first measured speed, scaled for mass
+  const k = Math.sqrt(mass / entry.reference_mass);
+  return entry.v1 * 0.55 * k;
+}
+
 function polarSink(coeffs, v_kmh) {
   return coeffs.a * v_kmh * v_kmh + coeffs.b * v_kmh + coeffs.c;
 }
@@ -210,15 +224,16 @@ function chartArea() {
 
 function computeRanges(entry, coeffs) {
   // X axis starts at v=0 so the Y axis IS the zero-speed axis.
-  // This makes the best-glide line (MC=0) originate from (0,0) at the left axis,
-  // and reveals the full left side of the parabola (increasing induced drag below min-sink).
+  // This makes the best-glide line (MC=0) originate from (0,0) at the left axis.
   const v_min_kmh = 0;
   const v_max_kmh = entry.v_max_kmh;
+  const stall_kmh = computeStallSpeed(entry, state.ballast_kg);
 
-  // Find worst (most negative) sink over the displayed speed range.
-  // Skip v=0 to avoid the large extrapolated c value dominating; start scan at 5 km/h.
+  // Find worst (most negative) sink over the displayed speed range, starting from
+  // stall speed so the Y axis isn't dominated by unrealistic sub-stall extrapolations.
+  const scan_start = Math.max(stall_kmh, 5);
   let w_min_ms = polarSink(coeffs, v_max_kmh) + state.airmass_ms;
-  for (let v = 5; v <= v_max_kmh; v += 2) {
+  for (let v = scan_start; v <= v_max_kmh; v += 2) {
     const w = polarSink(coeffs, v) + state.airmass_ms;
     if (w < w_min_ms) w_min_ms = w;
   }
@@ -233,6 +248,7 @@ function computeRanges(entry, coeffs) {
   return {
     v_min_kmh,
     v_max_kmh,
+    stall_kmh,
     v_min_disp: 0,   // 0 speed is 0 in every unit
     v_max_disp: convertSpeed(v_max_kmh, state.speedUnit),
     w_min_disp,
@@ -420,12 +436,14 @@ function drawPolarCurve(ranges) {
   ctx.setLineDash([]);
   ctx.lineJoin = 'round';
 
+  // Start curve at estimated stall speed — leave a gap to the left axis
+  const v_start = Math.max(ranges.stall_kmh, ranges.v_min_kmh);
   const steps = 300;
-  const dv = (ranges.v_max_kmh - ranges.v_min_kmh) / steps;
+  const dv = (ranges.v_max_kmh - v_start) / steps;
   let started = false;
 
   for (let i = 0; i <= steps; i++) {
-    const v_kmh = ranges.v_min_kmh + i * dv;
+    const v_kmh = v_start + i * dv;
     const w_ms  = polarSink(coeffs, v_kmh) + state.airmass_ms;
 
     const px = toCanvasX(convertSpeed(v_kmh, state.speedUnit), ranges);
@@ -435,6 +453,37 @@ function drawPolarCurve(ranges) {
     else ctx.lineTo(px, py);
   }
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawStallMarker(ranges) {
+  const stall_disp = convertSpeed(ranges.stall_kmh, state.speedUnit);
+  const px = toCanvasX(stall_disp, ranges);
+  const { left, right, top, bottom } = chartArea();
+  if (px < left || px > right) return;
+
+  ctx.save();
+
+  // Faint vertical dashed line at estimated stall speed
+  ctx.strokeStyle = C.stall;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 4]);
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.moveTo(px, top);
+  ctx.lineTo(px, bottom);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+
+  // Small label at top of the line
+  ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+  ctx.fillStyle = C.stall;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('Est. stall', px, top + 3);
+  ctx.fillText(`~${stall_disp.toFixed(0)} ${speedLabel()}`, px, top + 15);
+
   ctx.restore();
 }
 
@@ -619,6 +668,7 @@ function redraw() {
 
   drawGrid(ranges);
   drawAxes(ranges);
+  drawStallMarker(ranges);
   drawPolarCurve(ranges);
   drawMcLine(ranges);
   drawMinSinkMarker(ranges);
@@ -668,10 +718,11 @@ function handlePointer(e) {
     return;
   }
 
-  // Convert pointer X → speed → find sink on polar at that speed
+  // Convert pointer X → speed → find sink on polar at that speed.
+  // Clamp to [stall_kmh, v_max_kmh] so hover follows only the drawn curve.
   const speedDisp = fromCanvasX(px, state.ranges);
   const v_kmh = Math.max(
-    state.ranges.v_min_kmh,
+    state.ranges.stall_kmh,
     Math.min(state.ranges.v_max_kmh, speedDisp / SPEED_UNITS[state.speedUnit].factor)
   );
   const w_ms = polarSink(state.activeCoeffs, v_kmh) + state.airmass_ms;
