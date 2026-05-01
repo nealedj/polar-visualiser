@@ -198,7 +198,8 @@ function computeMcOptimal(coeffs, mc_ms, airmass_ms) {
   const discriminant = (coeffs.c + airmass_ms - mc_ms) / coeffs.a;
   if (discriminant <= 0) return null;
 
-  const v_opt = Math.sqrt(discriminant);
+  // Never draw STF below min-sink speed — clamp to the vertex of the parabola
+  const v_opt = Math.max(Math.sqrt(discriminant), minSinkSpeed(coeffs));
   const w_opt = polarSink(coeffs, v_opt) + airmass_ms;
 
   return { v_opt, w_opt };
@@ -727,11 +728,10 @@ function handlePointer(e) {
   }
 
   // Convert pointer X → speed → find sink on polar at that speed.
-  // Clamp minimum to min-sink speed: L/D is not meaningful below it for straight flight.
+  // Clamp to [stall_kmh, v_max_kmh] so hover follows only the drawn curve.
   const speedDisp = fromCanvasX(px, state.ranges);
-  const v_minsink = minSinkSpeed(state.activeCoeffs);
   const v_kmh = Math.max(
-    v_minsink,
+    state.ranges.stall_kmh,
     Math.min(state.ranges.v_max_kmh, speedDisp / SPEED_UNITS[state.speedUnit].factor)
   );
   const w_ms = polarSink(state.activeCoeffs, v_kmh) + state.airmass_ms;
