@@ -1,0 +1,22 @@
+GNU GENERAL PUBLIC LICENSE
+Version 2, June 1991
+
+SPDX-License-Identifier: GPL-2.0-only
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; version 2 of the License.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+The full license text is available at:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+---
+
+Polar data sourced from the XCSoar project (https://xcsoar.org),
+licensed under GPL-2.0. Source:
+https://github.com/XCSoar/XCSoar/blob/master/src/Polar/PolarStore.cpp
