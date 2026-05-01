@@ -683,12 +683,17 @@ function redraw() {
 const tooltip  = document.getElementById('tooltip');
 const tipSpeed = document.getElementById('tip-speed');
 const tipSink  = document.getElementById('tip-sink');
+const tipLd    = document.getElementById('tip-ld');
 
 function showTooltip(px, py, v_kmh, w_ms) {
   const rateDisp = convertRate(w_ms, state.sinkUnit);
   const sign = rateDisp >= 0 ? '+' : '';
   tipSpeed.textContent = `${convertSpeed(v_kmh, state.speedUnit).toFixed(1)} ${speedLabel()}`;
   tipSink.textContent  = `${sign}${rateDisp.toFixed(2)} ${sinkLabel()}`;
+  // L/D: forward speed (m/s) divided by sink speed (m/s), only meaningful when sinking
+  const v_ms = v_kmh / 3.6;
+  const ld = w_ms < -0.01 ? (v_ms / Math.abs(w_ms)).toFixed(1) : '—';
+  tipLd.textContent = `L/D: ${ld}`;
 
   const container = document.getElementById('chart-container');
   const cw = container.clientWidth;
