@@ -731,7 +731,7 @@ function redraw() {
                    cStall, cEntry.v_max_kmh, cEntry.name);
   }
 
-  drawMcLine(ranges, state.activeCoeffs, C.mc);
+  drawMcLine(ranges, state.activeCoeffs, state.compareMode ? C.polar : C.mc);
   if (state.compareMode && state.compareActiveCoeffs) {
     drawMcLine(ranges, state.compareActiveCoeffs, C.compare, true);
   }
