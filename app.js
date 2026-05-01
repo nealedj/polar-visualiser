@@ -198,7 +198,8 @@ function computeMcOptimal(coeffs, mc_ms, airmass_ms) {
   const discriminant = (coeffs.c + airmass_ms - mc_ms) / coeffs.a;
   if (discriminant <= 0) return null;
 
-  const v_opt = Math.sqrt(discriminant);
+  // Never draw STF below min-sink speed — clamp to the vertex of the parabola
+  const v_opt = Math.max(Math.sqrt(discriminant), minSinkSpeed(coeffs));
   const w_opt = polarSink(coeffs, v_opt) + airmass_ms;
 
   return { v_opt, w_opt };
@@ -229,21 +230,24 @@ function computeRanges(entry, coeffs) {
   const v_max_kmh = entry.v_max_kmh;
   const stall_kmh = computeStallSpeed(entry, state.ballast_kg);
 
-  // Find worst (most negative) sink over the displayed speed range, starting from
-  // stall speed so the Y axis isn't dominated by unrealistic sub-stall extrapolations.
+  // Find worst (most negative) and best (most positive) rate over the visible range,
+  // starting from stall speed so sub-stall extrapolations don't distort the axis.
   const scan_start = Math.max(stall_kmh, 5);
   let w_min_ms = polarSink(coeffs, v_max_kmh) + state.airmass_ms;
+  let w_max_ms = polarSink(coeffs, scan_start) + state.airmass_ms;
   for (let v = scan_start; v <= v_max_kmh; v += 2) {
     const w = polarSink(coeffs, v) + state.airmass_ms;
     if (w < w_min_ms) w_min_ms = w;
+    if (w > w_max_ms) w_max_ms = w;
   }
 
   // Y axis bottom: worst visible sink + 15% padding
   const w_min_disp = convertRate(w_min_ms, state.sinkUnit) * 1.15;
-  // Y axis top: enough to show 0 clearly and any MC anchor above zero
+  // Y axis top: highest of — curve peak, MC anchor, or 15% of range for breathing room
   const totalNeg = Math.abs(w_min_disp);
-  const mc_disp  = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
-  const w_max_disp = Math.max(totalNeg * 0.15, mc_disp + totalNeg * 0.06);
+  const mc_disp        = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
+  const curve_top_disp = convertRate(w_max_ms, state.sinkUnit);
+  const w_max_disp = Math.max(totalNeg * 0.15, mc_disp + totalNeg * 0.06, curve_top_disp * 1.15);
 
   return {
     v_min_kmh,
@@ -680,12 +684,17 @@ function redraw() {
 const tooltip  = document.getElementById('tooltip');
 const tipSpeed = document.getElementById('tip-speed');
 const tipSink  = document.getElementById('tip-sink');
+const tipLd    = document.getElementById('tip-ld');
 
 function showTooltip(px, py, v_kmh, w_ms) {
   const rateDisp = convertRate(w_ms, state.sinkUnit);
   const sign = rateDisp >= 0 ? '+' : '';
   tipSpeed.textContent = `${convertSpeed(v_kmh, state.speedUnit).toFixed(1)} ${speedLabel()}`;
   tipSink.textContent  = `${sign}${rateDisp.toFixed(2)} ${sinkLabel()}`;
+  // L/D: forward speed (m/s) divided by sink speed (m/s), only meaningful when sinking
+  const v_ms = v_kmh / 3.6;
+  const ld = w_ms < -0.01 ? (v_ms / Math.abs(w_ms)).toFixed(1) : '—';
+  tipLd.textContent = `L/D: ${ld}`;
 
   const container = document.getElementById('chart-container');
   const cw = container.clientWidth;
