@@ -12,6 +12,7 @@
   --color-axis: #424242;
   --color-header-bg: #1565c0;
   --color-header-text: #ffffff;
+  --color-compare: #00897b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +30,7 @@
     --color-axis: #bdbdbd;
     --color-header-bg: #0d47a1;
     --color-header-text: #ffffff;
+    --color-compare: #4db6ac;
   }
 }
 
@@ -214,6 +216,50 @@ fieldset input[type="radio"] {
   color: var(--color-text-secondary);
 }
 
+.compare-group {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.compare-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--color-compare);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--color-compare);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.compare-btn:hover {
+  background: color-mix(in srgb, var(--color-compare) 12%, transparent);
+}
+
+.compare-btn[aria-pressed="true"] {
+  background: var(--color-compare);
+  color: #fff;
+}
+
+#compare-aircraft-select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+
+#compare-aircraft-select:focus {
+  border-color: var(--color-compare);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-compare) 20%, transparent);
+}
+
 @media (max-width: 480px) {
   header h1 {
     font-size: 15px;
@@ -225,6 +271,11 @@ fieldset input[type="radio"] {
   }
 
   .aircraft-group {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  #compare-aircraft-group {
     flex: 1 1 100%;
     max-width: none;
   }
