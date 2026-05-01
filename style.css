@@ -234,6 +234,14 @@ fieldset input[type="radio"] {
   color: var(--color-text-secondary);
 }
 
+#tooltip.comparing #tip-sink {
+  color: var(--color-polar);
+}
+
+#tip-compare-sink {
+  color: var(--color-compare);
+}
+
 .compare-group {
   align-items: center;
   justify-content: flex-start;

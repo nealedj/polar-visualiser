@@ -531,8 +531,8 @@ function drawStallMarker(ranges) {
   ctx.restore();
 }
 
-function drawMcLine(ranges) {
-  const mc = computeMcOptimal(state.activeCoeffs, state.mc_ms, state.airmass_ms);
+function drawMcLine(ranges, coeffs, color) {
+  const mc = computeMcOptimal(coeffs, state.mc_ms, state.airmass_ms);
   if (!mc) return;
 
   const { v_opt, w_opt } = mc;
@@ -558,7 +558,7 @@ function drawMcLine(ranges) {
   ctx.rect(left, top, right - left, bottom - top);
   ctx.clip();
 
-  ctx.strokeStyle = C.mc;
+  ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 5]);
   ctx.beginPath();
@@ -572,23 +572,21 @@ function drawMcLine(ranges) {
   const py = toCanvasY(w_opt_disp, ranges);
   ctx.beginPath();
   ctx.arc(px, py, 5, 0, Math.PI * 2);
-  ctx.fillStyle = C.mc;
+  ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
 
   // Annotation: "Best Glide" at MC=0, "STF" otherwise
   const label  = state.mc_ms < 1e-9 ? 'Best Glide' : 'STF';
   const spd = v_opt_disp.toFixed(1);
-  const snk = Math.abs(w_opt_disp).toFixed(2);
   ctx.save();
   ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
-  ctx.fillStyle = C.mc;
+  ctx.fillStyle = color;
   const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 90);
-  const labelY = py - 18;
+  const labelY = py - 10;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, labelY);
-  ctx.fillText(`Sink: ${snk} ${sinkLabel()}`, labelX, labelY + 14);
   ctx.restore();
 
   // Cross-country speed: where the MC line crosses y=0 (zero-rate axis).
@@ -607,11 +605,11 @@ function drawMcLine(ranges) {
     ctx.lineTo(x_cc,     y0 + 6);
     ctx.lineTo(x_cc - 5, y0);
     ctx.closePath();
-    ctx.fillStyle = C.mc;
+    ctx.fillStyle = color;
     ctx.fill();
     // Speed label just above the zero line
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillStyle = C.mc;
+    ctx.fillStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     const v_cc_kmh = v_cc_disp / SPEED_UNITS[state.speedUnit].factor;
@@ -728,23 +726,40 @@ function redraw() {
                    cStall, cEntry.v_max_kmh, cEntry.name);
   }
 
-  drawMcLine(ranges);
+  drawMcLine(ranges, state.activeCoeffs, C.mc);
+  if (state.compareMode && state.compareActiveCoeffs) {
+    drawMcLine(ranges, state.compareActiveCoeffs, C.compare);
+  }
   if (!state.compareMode) drawMinSinkMarker(ranges);
   if (state.hoverPoint) drawHoverMarker(ranges);
 }
 
 // === TOOLTIP ===
 
-const tooltip  = document.getElementById('tooltip');
-const tipSpeed = document.getElementById('tip-speed');
-const tipSink  = document.getElementById('tip-sink');
-const tipLd    = document.getElementById('tip-ld');
+const tooltip       = document.getElementById('tooltip');
+const tipSpeed      = document.getElementById('tip-speed');
+const tipSink       = document.getElementById('tip-sink');
+const tipCompareSink = document.getElementById('tip-compare-sink');
+const tipLd         = document.getElementById('tip-ld');
 
 function showTooltip(px, py, v_kmh, w_ms) {
   const rateDisp = convertRate(w_ms, state.sinkUnit);
   const sign = rateDisp >= 0 ? '+' : '';
   tipSpeed.textContent = `${convertSpeed(v_kmh, state.speedUnit).toFixed(1)} ${speedLabel()}`;
   tipSink.textContent  = `${sign}${rateDisp.toFixed(2)} ${sinkLabel()}`;
+
+  if (state.compareMode && state.compareActiveCoeffs) {
+    const cw_ms = polarSink(state.compareActiveCoeffs, v_kmh) + state.airmass_ms;
+    const cRateDisp = convertRate(cw_ms, state.sinkUnit);
+    const cSign = cRateDisp >= 0 ? '+' : '';
+    tipCompareSink.textContent = `${cSign}${cRateDisp.toFixed(2)} ${sinkLabel()}`;
+    tipCompareSink.removeAttribute('hidden');
+    tooltip.classList.add('comparing');
+  } else {
+    tipCompareSink.setAttribute('hidden', '');
+    tooltip.classList.remove('comparing');
+  }
+
   // L/D: forward speed (m/s) divided by sink speed (m/s), only meaningful when sinking
   const v_ms = v_kmh / 3.6;
   const ld = w_ms < -0.01 ? (v_ms / Math.abs(w_ms)).toFixed(1) : '—';
