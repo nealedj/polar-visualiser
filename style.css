@@ -250,7 +250,7 @@ fieldset input[type="radio"] {
 
 #tip-speed {
   font-weight: 600;
-  color: var(--color-polar);
+  color: var(--color-text);
 }
 
 #tip-sink {
@@ -262,6 +262,18 @@ fieldset input[type="radio"] {
 }
 
 #tip-compare-sink {
+  color: var(--color-compare);
+}
+
+#tip-ld {
+  color: var(--color-text-secondary);
+}
+
+#tooltip.comparing #tip-ld {
+  color: var(--color-polar);
+}
+
+#tip-compare-ld {
   color: var(--color-compare);
 }
 

@@ -745,7 +745,8 @@ const tooltip       = document.getElementById('tooltip');
 const tipSpeed      = document.getElementById('tip-speed');
 const tipSink       = document.getElementById('tip-sink');
 const tipCompareSink = document.getElementById('tip-compare-sink');
-const tipLd         = document.getElementById('tip-ld');
+const tipLd          = document.getElementById('tip-ld');
+const tipCompareLd   = document.getElementById('tip-compare-ld');
 
 function showTooltip(px, py, v_kmh, w_ms) {
   const rateDisp = convertRate(w_ms, state.sinkUnit);
@@ -753,20 +754,25 @@ function showTooltip(px, py, v_kmh, w_ms) {
   tipSpeed.textContent = `${convertSpeed(v_kmh, state.speedUnit).toFixed(1)} ${speedLabel()}`;
   tipSink.textContent  = `${sign}${rateDisp.toFixed(2)} ${sinkLabel()}`;
 
+  const v_ms = v_kmh / 3.6;
+
   if (state.compareMode && state.compareActiveCoeffs) {
     const cw_ms = polarSink(state.compareActiveCoeffs, v_kmh) + state.airmass_ms;
     const cRateDisp = convertRate(cw_ms, state.sinkUnit);
     const cSign = cRateDisp >= 0 ? '+' : '';
     tipCompareSink.textContent = `${cSign}${cRateDisp.toFixed(2)} ${sinkLabel()}`;
     tipCompareSink.removeAttribute('hidden');
+    const cLd = cw_ms < -0.01 ? (v_ms / Math.abs(cw_ms)).toFixed(1) : '—';
+    tipCompareLd.textContent = `L/D: ${cLd}`;
+    tipCompareLd.removeAttribute('hidden');
     tooltip.classList.add('comparing');
   } else {
     tipCompareSink.setAttribute('hidden', '');
+    tipCompareLd.setAttribute('hidden', '');
     tooltip.classList.remove('comparing');
   }
 
   // L/D: forward speed (m/s) divided by sink speed (m/s), only meaningful when sinking
-  const v_ms = v_kmh / 3.6;
   const ld = w_ms < -0.01 ? (v_ms / Math.abs(w_ms)).toFixed(1) : '—';
   tipLd.textContent = `L/D: ${ld}`;
 
