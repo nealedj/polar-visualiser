@@ -577,16 +577,23 @@ function drawMcLine(ranges, coeffs, color, labelBelow = false) {
   ctx.restore();
 
   // Annotation: "Best Glide" at MC=0, "STF" otherwise
-  const label  = state.mc_ms < 1e-9 ? 'Best Glide' : 'STF';
+  // Primary: label to the right of tangent point, above.
+  // Compare: label to the left of tangent point, below — avoids overlap.
+  const label = state.mc_ms < 1e-9 ? 'Best Glide' : 'STF';
   const spd = v_opt_disp.toFixed(1);
   ctx.save();
   ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.fillStyle = color;
-  const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 90);
-  const labelY = labelBelow ? py + 8 : py - 10;
-  ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, labelY);
+  if (labelBelow) {
+    ctx.textAlign = 'right';
+    const labelX = Math.max(px - 8, MARGIN.left + 4);
+    ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, py + 8);
+  } else {
+    ctx.textAlign = 'left';
+    const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 4);
+    ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, py - 18);
+  }
   ctx.restore();
 
   // Cross-country speed: where the MC line crosses y=0 (zero-rate axis).
@@ -607,20 +614,22 @@ function drawMcLine(ranges, coeffs, color, labelBelow = false) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    // Speed label: above the zero line for primary, below for compare
+    // Speed label: primary anchors left (text extends right), above zero line.
+    // Compare anchors right (text extends left), below zero line.
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.fillStyle = color;
-    ctx.textAlign = 'center';
     const v_cc_kmh = v_cc_disp / SPEED_UNITS[state.speedUnit].factor;
-    const line1 = state.speedUnit === 'kmh'
+    const ccLabel = state.speedUnit === 'kmh'
       ? `${v_cc_kmh.toFixed(0)} km/h`
       : `${v_cc_disp.toFixed(1)} ${speedLabel()} (${v_cc_kmh.toFixed(0)} km/h)`;
     if (labelBelow) {
+      ctx.textAlign = 'right';
       ctx.textBaseline = 'top';
-      ctx.fillText(line1, x_cc, y0 + 7);
+      ctx.fillText(ccLabel, x_cc - 8, y0 + 8);
     } else {
+      ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(line1, x_cc, y0 - 7);
+      ctx.fillText(ccLabel, x_cc + 8, y0 - 8);
     }
     ctx.restore();
   }
@@ -821,12 +830,48 @@ function handlePointer(e) {
   showTooltip(px, py, v_kmh, w_ms);
 }
 
-canvas.addEventListener('pointermove', handlePointer);
-canvas.addEventListener('pointerdown', handlePointer);
-canvas.addEventListener('pointerleave', () => {
-  state.hoverPoint = null;
-  redraw();
-  hideTooltip();
+// Touch: tap-to-show/hide, drag-to-track. Mouse: hover as normal.
+const DRAG_THRESHOLD = 8;
+let touchStartPos = null;
+let touchDragging  = false;
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') { handlePointer(e); return; }
+  touchStartPos = { x: e.clientX, y: e.clientY };
+  touchDragging  = false;
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') { handlePointer(e); return; }
+  if (!touchStartPos) return;
+  const dx = e.clientX - touchStartPos.x;
+  const dy = e.clientY - touchStartPos.y;
+  if (!touchDragging && Math.hypot(dx, dy) > DRAG_THRESHOLD) touchDragging = true;
+  if (touchDragging) handlePointer(e);
+});
+
+canvas.addEventListener('pointerup', (e) => {
+  if (e.pointerType !== 'touch') return;
+  if (!touchDragging) {
+    // Tap: toggle visibility
+    if (state.hoverPoint) {
+      state.hoverPoint = null; redraw(); hideTooltip();
+    } else {
+      handlePointer(e);
+    }
+  }
+  touchStartPos = null;
+  touchDragging  = false;
+});
+
+canvas.addEventListener('pointercancel', () => {
+  touchStartPos = null; touchDragging = false;
+});
+
+canvas.addEventListener('pointerleave', (e) => {
+  if (e.pointerType === 'touch') return; // touch manages its own lifecycle
+  state.hoverPoint = null; redraw(); hideTooltip();
 });
 
 // === UI CONTROLS ===
