@@ -20,6 +20,16 @@
         </select>
       </div>
 
+      <div class="control-group compare-group">
+        <label>Compare</label>
+        <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
+      </div>
+
+      <div class="control-group aircraft-group" id="compare-aircraft-group" hidden>
+        <label for="compare-aircraft-select">Compare aircraft</label>
+        <select id="compare-aircraft-select" disabled><option>Loading…</option></select>
+      </div>
+
       <div class="control-group">
         <fieldset>
           <legend>Speed units</legend>
@@ -58,6 +68,13 @@
           Ballast: <span id="ballast-value">0</span> kg <span id="ballast-max"></span>
         </label>
         <input type="range" id="ballast-slider" min="0" max="0" step="1" value="0" disabled>
+      </div>
+
+      <div class="control-group slider-group" id="compare-ballast-group" hidden>
+        <label for="compare-ballast-slider">
+          Compare Ballast: <span id="compare-ballast-value">0</span> kg <span id="compare-ballast-max"></span>
+        </label>
+        <input type="range" id="compare-ballast-slider" min="0" max="0" step="1" value="0" disabled>
       </div>
     </div>
 

@@ -36,6 +36,7 @@ const C = {
   zeroline:'#888888',
   minsink: '#9c27b0',
   stall:   '#e65100',
+  compare: '#00897b',
 };
 
 // === APPLICATION STATE ===
@@ -54,6 +55,12 @@ const state = {
   ranges: null,        // cached axis ranges
   canvasW: 0,
   canvasH: 0,
+  // comparison mode
+  compareMode: false,
+  compareIndex: 0,
+  compareCoeffs: null,
+  compareActiveCoeffs: null,
+  compareBallast_kg: 0,
 };
 
 // === UNIT CONVERSION ===
@@ -175,6 +182,14 @@ function updateActiveCoeffs() {
   state.activeCoeffs = applyBallast(state.coeffs, entry.reference_mass, state.ballast_kg);
 }
 
+function updateCompareCoeffs() {
+  if (!state.compareMode || state.compareCoeffs === null) return;
+  const entry = state.polars[state.compareIndex];
+  state.compareActiveCoeffs = applyBallast(
+    state.compareCoeffs, entry.reference_mass, state.compareBallast_kg
+  );
+}
+
 // Estimate stall speed in km/h using wing loading formula, or fallback to v1 × 0.55.
 // CLmax ≈ 2.0 matches published stall speeds for typical competition gliders.
 function computeStallSpeed(entry, ballast_kg) {
@@ -227,7 +242,7 @@ function computeRanges(entry, coeffs) {
   // X axis starts at v=0 so the Y axis IS the zero-speed axis.
   // This makes the best-glide line (MC=0) originate from (0,0) at the left axis.
   const v_min_kmh = 0;
-  const v_max_kmh = entry.v_max_kmh;
+  let v_max_kmh = entry.v_max_kmh;
   const stall_kmh = computeStallSpeed(entry, state.ballast_kg);
 
   // Find worst (most negative) and best (most positive) rate over the visible range,
@@ -239,6 +254,20 @@ function computeRanges(entry, coeffs) {
     const w = polarSink(coeffs, v) + state.airmass_ms;
     if (w < w_min_ms) w_min_ms = w;
     if (w > w_max_ms) w_max_ms = w;
+  }
+
+  // Envelope comparison glider's curve into the axis ranges
+  if (state.compareMode && state.compareActiveCoeffs) {
+    const cEntry = state.polars[state.compareIndex];
+    const cVmax  = cEntry.v_max_kmh;
+    const cStall = computeStallSpeed(cEntry, state.compareBallast_kg);
+    const cStart = Math.max(cStall, 5);
+    if (cVmax > v_max_kmh) v_max_kmh = cVmax;
+    for (let v = cStart; v <= cVmax; v += 2) {
+      const w = polarSink(state.compareActiveCoeffs, v) + state.airmass_ms;
+      if (w < w_min_ms) w_min_ms = w;
+      if (w > w_max_ms) w_max_ms = w;
+    }
   }
 
   // Y axis bottom: worst visible sink + 15% padding
@@ -302,12 +331,13 @@ function resolveColours() {
   const s = getComputedStyle(document.documentElement);
   const get = v => s.getPropertyValue(v).trim();
   const apply = (key, cssVar) => { const v = get(cssVar); if (v) C[key] = v; };
-  apply('polar',  '--color-polar');
-  apply('mc',     '--color-mc');
-  apply('hover',  '--color-hover');
-  apply('grid',   '--color-grid');
-  apply('axis',   '--color-axis');
-  apply('text',   '--color-text');
+  apply('polar',   '--color-polar');
+  apply('mc',      '--color-mc');
+  apply('hover',   '--color-hover');
+  apply('grid',    '--color-grid');
+  apply('axis',    '--color-axis');
+  apply('text',    '--color-text');
+  apply('compare', '--color-compare');
 }
 
 // === DRAWING ===
@@ -425,8 +455,7 @@ function drawAxes(ranges) {
   ctx.restore();
 }
 
-function drawPolarCurve(ranges) {
-  const coeffs = state.activeCoeffs;
+function drawPolarCurve(ranges, coeffs, color, stallKmh, curveVmax, label) {
   const { left, right, top, bottom } = chartArea();
 
   ctx.save();
@@ -435,16 +464,17 @@ function drawPolarCurve(ranges) {
   ctx.clip();
 
   ctx.beginPath();
-  ctx.strokeStyle = C.polar;
+  ctx.strokeStyle = color;
   ctx.lineWidth = 2.5;
   ctx.setLineDash([]);
   ctx.lineJoin = 'round';
 
   // Start curve at estimated stall speed — leave a gap to the left axis
-  const v_start = Math.max(ranges.stall_kmh, ranges.v_min_kmh);
+  const v_start = Math.max(stallKmh, ranges.v_min_kmh);
   const steps = 300;
-  const dv = (ranges.v_max_kmh - v_start) / steps;
+  const dv = (curveVmax - v_start) / steps;
   let started = false;
+  let lastPx, lastPy;
 
   for (let i = 0; i <= steps; i++) {
     const v_kmh = v_start + i * dv;
@@ -455,8 +485,18 @@ function drawPolarCurve(ranges) {
 
     if (!started) { ctx.moveTo(px, py); started = true; }
     else ctx.lineTo(px, py);
+    lastPx = px; lastPy = py;
   }
   ctx.stroke();
+
+  if (label && lastPx !== undefined) {
+    ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(label, lastPx - 4, lastPy - 4);
+  }
+
   ctx.restore();
 }
 
@@ -672,10 +712,24 @@ function redraw() {
 
   drawGrid(ranges);
   drawAxes(ranges);
-  drawStallMarker(ranges);
-  drawPolarCurve(ranges);
+
+  const primaryStall = computeStallSpeed(entry, state.ballast_kg);
+
+  if (!state.compareMode) drawStallMarker(ranges);
+
+  drawPolarCurve(ranges, state.activeCoeffs, C.polar,
+                 primaryStall, entry.v_max_kmh,
+                 state.compareMode ? entry.name : null);
+
+  if (state.compareMode && state.compareActiveCoeffs) {
+    const cEntry = state.polars[state.compareIndex];
+    const cStall = computeStallSpeed(cEntry, state.compareBallast_kg);
+    drawPolarCurve(ranges, state.compareActiveCoeffs, C.compare,
+                   cStall, cEntry.v_max_kmh, cEntry.name);
+  }
+
   drawMcLine(ranges);
-  drawMinSinkMarker(ranges);
+  if (!state.compareMode) drawMinSinkMarker(ranges);
   if (state.hoverPoint) drawHoverMarker(ranges);
 }
 
@@ -841,6 +895,66 @@ function initControls() {
   updateBallastSlider();
   updateSliderConfigs();
   updateSliderLabels();
+  initCompareControls();
+}
+
+function initCompareControls() {
+  const toggle      = document.getElementById('compare-toggle');
+  const group       = document.getElementById('compare-aircraft-group');
+  const selectEl    = document.getElementById('compare-aircraft-select');
+  const ballastGrp  = document.getElementById('compare-ballast-group');
+  const ballastSldr = document.getElementById('compare-ballast-slider');
+  const ballastVal  = document.getElementById('compare-ballast-value');
+  const ballastMax  = document.getElementById('compare-ballast-max');
+
+  selectEl.innerHTML = state.polars
+    .map((p, i) => `<option value="${i}">${p.name}</option>`)
+    .join('');
+  state.compareIndex = state.polars.length > 1 ? 1 : 0;
+  selectEl.value = String(state.compareIndex);
+  selectEl.removeAttribute('disabled');
+
+  function loadCompareGlider() {
+    const cEntry = state.polars[state.compareIndex];
+    state.compareBallast_kg = 0;
+    state.compareCoeffs = fitPolar(cEntry);
+    updateCompareCoeffs();
+    const max = cEntry.max_ballast || 0;
+    ballastSldr.max      = max;
+    ballastSldr.value    = 0;
+    ballastSldr.disabled = max === 0;
+    ballastVal.textContent = '0';
+    ballastMax.textContent = max > 0 ? `/ ${max} kg` : '(none)';
+  }
+
+  toggle.addEventListener('click', () => {
+    state.compareMode = !state.compareMode;
+    toggle.setAttribute('aria-pressed', String(state.compareMode));
+    group.hidden      = !state.compareMode;
+    ballastGrp.hidden = !state.compareMode;
+    if (state.compareMode) {
+      loadCompareGlider();
+    } else {
+      state.compareCoeffs       = null;
+      state.compareActiveCoeffs = null;
+    }
+    state.hoverPoint = null;
+    hideTooltip();
+    redraw();
+  });
+
+  selectEl.addEventListener('change', () => {
+    state.compareIndex = parseInt(selectEl.value, 10);
+    loadCompareGlider();
+    redraw();
+  });
+
+  ballastSldr.addEventListener('input', function () {
+    state.compareBallast_kg = parseInt(this.value, 10);
+    ballastVal.textContent = state.compareBallast_kg;
+    updateCompareCoeffs();
+    redraw();
+  });
 }
 
 function updateBallastSlider() {
