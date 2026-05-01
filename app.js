@@ -607,16 +607,21 @@ function drawMcLine(ranges, coeffs, color, labelBelow = false) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    // Speed label just above the zero line
+    // Speed label: above the zero line for primary, below for compare
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.fillStyle = color;
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
     const v_cc_kmh = v_cc_disp / SPEED_UNITS[state.speedUnit].factor;
     const line1 = state.speedUnit === 'kmh'
       ? `${v_cc_kmh.toFixed(0)} km/h`
       : `${v_cc_disp.toFixed(1)} ${speedLabel()} (${v_cc_kmh.toFixed(0)} km/h)`;
-    ctx.fillText(line1, x_cc, y0 - 7);
+    if (labelBelow) {
+      ctx.textBaseline = 'top';
+      ctx.fillText(line1, x_cc, y0 + 7);
+    } else {
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(line1, x_cc, y0 - 7);
+    }
     ctx.restore();
   }
 }

@@ -15,14 +15,12 @@
     <div id="controls">
       <div class="control-group aircraft-group">
         <label for="aircraft-select"><span class="color-swatch" style="background:var(--color-polar)"></span>Aircraft</label>
-        <select id="aircraft-select" disabled>
-          <option>Loading polars…</option>
-        </select>
-      </div>
-
-      <div class="control-group compare-group">
-        <label>Compare</label>
-        <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
+        <div class="aircraft-row">
+          <select id="aircraft-select" disabled>
+            <option>Loading polars…</option>
+          </select>
+          <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
+        </div>
       </div>
 
       <div class="control-group aircraft-group" id="compare-aircraft-group" hidden>
