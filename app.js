@@ -727,10 +727,11 @@ function handlePointer(e) {
   }
 
   // Convert pointer X → speed → find sink on polar at that speed.
-  // Clamp to [stall_kmh, v_max_kmh] so hover follows only the drawn curve.
+  // Clamp minimum to min-sink speed: L/D is not meaningful below it for straight flight.
   const speedDisp = fromCanvasX(px, state.ranges);
+  const v_minsink = minSinkSpeed(state.activeCoeffs);
   const v_kmh = Math.max(
-    state.ranges.stall_kmh,
+    v_minsink,
     Math.min(state.ranges.v_max_kmh, speedDisp / SPEED_UNITS[state.speedUnit].factor)
   );
   const w_ms = polarSink(state.activeCoeffs, v_kmh) + state.airmass_ms;
