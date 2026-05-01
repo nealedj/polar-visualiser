@@ -229,21 +229,24 @@ function computeRanges(entry, coeffs) {
   const v_max_kmh = entry.v_max_kmh;
   const stall_kmh = computeStallSpeed(entry, state.ballast_kg);
 
-  // Find worst (most negative) sink over the displayed speed range, starting from
-  // stall speed so the Y axis isn't dominated by unrealistic sub-stall extrapolations.
+  // Find worst (most negative) and best (most positive) rate over the visible range,
+  // starting from stall speed so sub-stall extrapolations don't distort the axis.
   const scan_start = Math.max(stall_kmh, 5);
   let w_min_ms = polarSink(coeffs, v_max_kmh) + state.airmass_ms;
+  let w_max_ms = polarSink(coeffs, scan_start) + state.airmass_ms;
   for (let v = scan_start; v <= v_max_kmh; v += 2) {
     const w = polarSink(coeffs, v) + state.airmass_ms;
     if (w < w_min_ms) w_min_ms = w;
+    if (w > w_max_ms) w_max_ms = w;
   }
 
   // Y axis bottom: worst visible sink + 15% padding
   const w_min_disp = convertRate(w_min_ms, state.sinkUnit) * 1.15;
-  // Y axis top: enough to show 0 clearly and any MC anchor above zero
+  // Y axis top: highest of — curve peak, MC anchor, or 15% of range for breathing room
   const totalNeg = Math.abs(w_min_disp);
-  const mc_disp  = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
-  const w_max_disp = Math.max(totalNeg * 0.15, mc_disp + totalNeg * 0.06);
+  const mc_disp        = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
+  const curve_top_disp = convertRate(w_max_ms, state.sinkUnit);
+  const w_max_disp = Math.max(totalNeg * 0.15, mc_disp + totalNeg * 0.06, curve_top_disp * 1.15);
 
   return {
     v_min_kmh,
