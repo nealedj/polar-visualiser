@@ -67,6 +67,18 @@ const DJ_POLARS = [
     v1:  63.8, w1: -0.889,
     v2:  84.3, w2: -1.085,
     v3: 191.2, w3: -6.456 },
+
+  // Nimbus 3/24.5 — DJ's personal glider N49JD (490 kg / 1080 lb, unballasted)
+  // Measured composite polar: min-sink 70 fpm @ 42.5 kt; best L/D 59 @ ~48 kt
+  // Wide laminar bucket 38–47 kt cannot be captured by a single parabola; fit
+  // through (47 kt, 80 fpm), (80 kt, 235 fpm), (100 kt, 423 fpm) gives 74 fpm
+  // min-sink — closest achievable with three-point parabola.
+  // Data from archived performance charts (jimphoenix.com).
+  { name: 'Nimbus 3 (DJ Test)',
+    reference_mass: 527, max_ballast: 159, wing_area: 16.70, v_max_kmh: 270,
+    v1:  90.2, w1: -0.421,
+    v2: 153.7, w2: -1.238,
+    v3: 192.1, w3: -2.228 },
 ];
 
 const MARGIN = { top: 24, right: 30, bottom: 52, left: 72 };
