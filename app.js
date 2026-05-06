@@ -3,6 +3,72 @@
 const POLAR_URL =
   'https://raw.githubusercontent.com/XCSoar/XCSoar/master/src/Polar/PolarStore.cpp';
 
+// Dick Johnson flight-test polars, compiled from his Soaring Magazine articles.
+// All values normalised to the matching XCSoar reference mass via wing-loading
+// scaling (v_scaled = v_test × k, w_scaled = w_test × k, k = √(ref / test)).
+// Three-point polar (v km/h, w m/s); v3 marked with comment where estimated.
+const DJ_POLARS = [
+  // ASW-20 — Johnson, Soaring May 1978 (test ≈ 330 kg)
+  // Measured: min-sink 0.59 m/s @ 84 km/h; best L/D 42.5 @ 100 km/h
+  { name: 'ASW-20 (DJ Test)',
+    reference_mass: 377, max_ballast: 159, wing_area: 10.5, v_max_kmh: 270,
+    v1:  89.8, w1: -0.631,
+    v2: 106.9, w2: -0.699,
+    v3: 158.2, w3: -1.429 }, // v3 estimated from parabolic fit at 80 kt
+
+  // Discus — Johnson, Soaring Feb 1986 (test ≈ 338 kg, 32 kg/m²)
+  // Data digitised from article graph (rec.aviation.soaring)
+  // Measured: min-sink 115 fpm @ 45 kt; best L/D 42.5 @ 53 kt; 308 fpm @ 80 kt
+  { name: 'Discus (DJ Test)',
+    reference_mass: 350, max_ballast: 182, wing_area: 10.58, v_max_kmh: 250,
+    v1:  84.8, w1: -0.594,
+    v2:  99.9, w2: -0.653,
+    v3: 150.8, w3: -1.597 },
+
+  // Duo Discus — Johnson, Oct 1998 (test ≈ 581 kg, 2 pilots, unballasted)
+  // Measured: best L/D 45.9 @ 61 kt; min-sink ~100 fpm @ 44 kt
+  // Points derived from parabola constrained to these two values; actual polar
+  // has an unusually flat laminar bucket 45–61 kt that a parabola can't capture.
+  // Parabola gives 119 fpm min-sink (measured ~100 fpm) — inherent approximation.
+  { name: 'Duo Discus (DJ Test)',
+    reference_mass: 615, max_ballast: 80, wing_area: 16.4, v_max_kmh: 260,
+    v1:  83.8, w1: -0.605,
+    v2: 116.3, w2: -0.704,
+    v3: 190.3, w3: -1.661 }, // v3 estimated; laminar bucket collapses above ~95 kt
+
+  // G 102 Club Astir IIIb — Johnson (test ≈ 345 kg, with wing-root seals)
+  // Measured: min-sink 138 fpm @ 42 kt; best L/D 33.3 @ 50 kt; 370 fpm @ 80 kt
+  { name: 'G 102 Club Astir IIIb (DJ Test)',
+    reference_mass: 380, max_ballast: 0, wing_area: 12.4, v_max_kmh: 220,
+    v1:  81.6, w1: -0.735,
+    v2:  97.1, w2: -0.810,
+    v3: 155.5, w3: -1.972 },
+
+  // G 103 Twin II — Johnson (test ≈ 579 kg, 2 persons)
+  // Measured: min-sink 147 fpm @ 43 kt; best L/D 33 @ 53 kt; <350 fpm @ 80 kt
+  { name: 'G 103 Twin 2 (DJ Test)',
+    reference_mass: 580, max_ballast: 0, wing_area: 17.52, v_max_kmh: 220,
+    v1:  79.6, w1: -0.747,
+    v2:  98.2, w2: -0.827,
+    v3: 148.2, w3: -1.778 },
+
+  // LS-3 — Johnson, Soaring Nov 1978 (test ≈ 330 kg, with wing seals)
+  // Measured: best L/D 41.8 @ 59 kt; 8 % less sink than ASW-20 @ 80 kt
+  { name: 'LS-3 (DJ Test)',
+    reference_mass: 383, max_ballast: 121, wing_area: 10.5, v_max_kmh: 250,
+    v1:  95.7, w1: -0.709,
+    v2: 117.8, w2: -0.782,
+    v3: 159.7, w3: -1.326 },
+
+  // SGS 1-26E — Johnson, Soaring Feb 1977 (test 281 kg / 620 lb)
+  // Measured: min-sink 165 fpm @ 32.5 kt; best L/D 21.6 @ 43 kt; 1200 fpm @ 97.5 kt
+  { name: 'SGS 1-26E (DJ Test)',
+    reference_mass: 315, max_ballast: 0, wing_area: 14.87, v_max_kmh: 185,
+    v1:  63.8, w1: -0.889,
+    v2:  84.3, w2: -1.085,
+    v3: 191.2, w3: -6.456 },
+];
+
 const MARGIN = { top: 24, right: 30, bottom: 52, left: 72 };
 
 // Conversion factors from internal units (km/h, m/s) to display units
@@ -85,10 +151,22 @@ function sinkDispToMs(val) { return val / SINK_UNITS[state.sinkUnit].factor; }
 // === DATA FETCHING & PARSING ===
 
 async function fetchPolars() {
-  const resp = await fetch(POLAR_URL);
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const text = await resp.text();
-  return parsePolars(text);
+  let xcsoar = [];
+  try {
+    const resp = await fetch(POLAR_URL);
+    if (resp.ok) xcsoar = parsePolars(await resp.text());
+    else console.warn('XCSoar polar store returned HTTP', resp.status);
+  } catch (e) {
+    console.warn('XCSoar polar store unavailable:', e.message);
+  }
+
+  const all = [...xcsoar, ...DJ_POLARS].sort((a, b) => a.name.localeCompare(b.name));
+  const seen = new Set();
+  return all.filter(p => {
+    if (seen.has(p.name)) return false;
+    seen.add(p.name);
+    return true;
+  });
 }
 
 function parsePolars(cpp) {
