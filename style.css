@@ -143,16 +143,59 @@ header h1 {
   gap: 8px;
 }
 
-.aircraft-row input {
+.aircraft-row .combo {
   flex: 1;
   min-width: 0;
 }
 
-#aircraft-select {
-  padding: 5px 8px;
+.combo {
+  position: relative;
+}
+
+/* Chevron so the field reads as a dropdown, not a plain text box */
+.combo input {
+  width: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 26px;
+}
+
+.combo-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  background: var(--color-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  list-style: none;
+  padding: 4px 0;
+  z-index: 50;
+}
+
+.combo-list li {
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.combo-list li:hover,
+.combo-list li.active {
+  background: color-mix(in srgb, var(--color-polar) 16%, transparent);
+}
+
+#aircraft-select {
+  padding: 5px 26px 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background-color: var(--color-bg);
   color: var(--color-text);
   font-family: inherit;
   font-size: 13px;
@@ -321,10 +364,10 @@ fieldset input[type="radio"] {
 
 #compare-aircraft-select {
   width: 100%;
-  padding: 5px 8px;
+  padding: 5px 26px 5px 8px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  background: var(--color-bg);
+  background-color: var(--color-bg);
   color: var(--color-text);
   font-family: inherit;
   font-size: 13px;

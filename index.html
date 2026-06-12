@@ -23,19 +23,23 @@
       <div class="control-group aircraft-group">
         <label for="aircraft-select"><span class="color-swatch" style="background:var(--color-polar)"></span>Aircraft</label>
         <div class="aircraft-row">
-          <input id="aircraft-select" list="glider-list" placeholder="Loading polars…"
-                 autocomplete="off" spellcheck="false" disabled>
+          <div class="combo">
+            <input id="aircraft-select" placeholder="Loading polars…"
+                   autocomplete="off" spellcheck="false" disabled>
+            <ul id="aircraft-list" class="combo-list" role="listbox" hidden></ul>
+          </div>
           <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
         </div>
       </div>
 
       <div class="control-group aircraft-group" id="compare-aircraft-group" hidden>
         <label for="compare-aircraft-select"><span class="color-swatch" style="background:var(--color-compare)"></span>Compare aircraft</label>
-        <input id="compare-aircraft-select" list="glider-list" placeholder="Loading…"
-               autocomplete="off" spellcheck="false" disabled>
+        <div class="combo">
+          <input id="compare-aircraft-select" placeholder="Loading…"
+                 autocomplete="off" spellcheck="false" disabled>
+          <ul id="compare-aircraft-list" class="combo-list" role="listbox" hidden></ul>
+        </div>
       </div>
-
-      <datalist id="glider-list"></datalist>
 
       <div class="control-group">
         <fieldset>
