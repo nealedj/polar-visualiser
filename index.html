@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive glider polar curve visualiser — explore sink rate, best glide, MacCready speed-to-fly, ballast and airmass effects for hundreds of gliders.">
+  <meta name="theme-color" content="#1565c0">
+  <meta property="og:title" content="Glider Polar Visualiser">
+  <meta property="og:description" content="Interactive glider polar curve visualiser — explore sink rate, best glide, MacCready speed-to-fly, ballast and airmass effects for hundreds of gliders.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nealedj.github.io/polar-visualiser/">
   <title>Glider Polar Visualiser</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231565c0'/%3E%3Cpath d='M5 13 Q 11 6 17 12 Q 23 18 28 28' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,17 +23,19 @@
       <div class="control-group aircraft-group">
         <label for="aircraft-select"><span class="color-swatch" style="background:var(--color-polar)"></span>Aircraft</label>
         <div class="aircraft-row">
-          <select id="aircraft-select" disabled>
-            <option>Loading polars…</option>
-          </select>
+          <input id="aircraft-select" list="glider-list" placeholder="Loading polars…"
+                 autocomplete="off" spellcheck="false" disabled>
           <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
         </div>
       </div>
 
       <div class="control-group aircraft-group" id="compare-aircraft-group" hidden>
         <label for="compare-aircraft-select"><span class="color-swatch" style="background:var(--color-compare)"></span>Compare aircraft</label>
-        <select id="compare-aircraft-select" disabled><option>Loading…</option></select>
+        <input id="compare-aircraft-select" list="glider-list" placeholder="Loading…"
+               autocomplete="off" spellcheck="false" disabled>
       </div>
+
+      <datalist id="glider-list"></datalist>
 
       <div class="control-group">
         <fieldset>
@@ -77,7 +86,10 @@
     </div>
 
     <div id="chart-container">
-      <canvas id="polar-canvas"></canvas>
+      <canvas id="polar-canvas" role="img" aria-label="Glider polar curve chart">
+        Interactive chart of the selected glider's polar curve.
+      </canvas>
+      <div id="chart-status" role="status">Loading polar data…</div>
       <div id="tooltip" hidden>
         <div id="tip-speed"></div>
         <div id="tip-sink"></div>
