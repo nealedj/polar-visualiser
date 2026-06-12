@@ -37,6 +37,7 @@ const C = {
   minsink: '#9c27b0',
   stall:   '#e65100',
   compare: '#00897b',
+  surface: '#ffffff',
 };
 
 // === APPLICATION STATE ===
@@ -338,6 +339,9 @@ function resolveColours() {
   apply('axis',    '--color-axis');
   apply('text',    '--color-text');
   apply('compare', '--color-compare');
+  apply('stall',   '--color-stall');
+  apply('minsink', '--color-minsink');
+  apply('surface', '--color-surface');
 }
 
 // === DRAWING ===
@@ -699,6 +703,87 @@ function drawHoverMarker(ranges) {
   ctx.restore();
 }
 
+// === LEGEND ===
+
+function drawLegend() {
+  const { right, top } = chartArea();
+
+  const items = [];
+
+  if (state.compareMode && state.compareActiveCoeffs) {
+    const truncate = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+    items.push({ label: truncate(state.polars[state.selectedIndex].name, 22), color: C.polar,   dash: [],     marker: 'line' });
+    items.push({ label: truncate(state.polars[state.compareIndex].name,  22), color: C.compare, dash: [],     marker: 'line' });
+  } else {
+    items.push({ label: 'Polar curve', color: C.polar, dash: [], marker: 'line' });
+  }
+
+  items.push({ label: state.mc_ms < 1e-9 ? 'Best glide' : 'STF line', color: C.mc, dash: [6, 5], marker: 'line' });
+
+  if (!state.compareMode) {
+    items.push({ label: 'Min sink',   color: C.minsink, dash: [],     marker: 'circle' });
+    items.push({ label: 'Est. stall', color: C.stall,   dash: [3, 4], marker: 'line'   });
+  }
+
+  const PAD      = 8;
+  const ITEM_H   = 18;
+  const SWATCH_W = 22;
+  const FONT     = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  ctx.font = FONT;
+  const maxTextW = Math.max(...items.map(it => ctx.measureText(it.label).width));
+  const boxW = PAD + SWATCH_W + 6 + maxTextW + PAD;
+  const boxH = PAD + items.length * ITEM_H + PAD / 2;
+  const bx   = right - boxW - 6;
+  const by   = top + 6;
+
+  ctx.save();
+
+  ctx.beginPath();
+  ctx.roundRect(bx, by, boxW, boxH, 4);
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = C.surface;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.beginPath();
+  ctx.roundRect(bx, by, boxW, boxH, 4);
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  items.forEach((item, i) => {
+    const iy = by + PAD + i * ITEM_H + ITEM_H / 2;
+    const ix = bx + PAD;
+
+    ctx.strokeStyle = item.color;
+    ctx.fillStyle   = item.color;
+    ctx.setLineDash(item.dash);
+
+    if (item.marker === 'line') {
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(ix,              iy);
+      ctx.lineTo(ix + SWATCH_W,   iy);
+      ctx.stroke();
+    } else if (item.marker === 'circle') {
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ix + SWATCH_W / 2, iy, 3.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    ctx.fillStyle    = C.text;
+    ctx.font         = FONT;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.label, ix + SWATCH_W + 6, iy);
+  });
+
+  ctx.restore();
+}
+
 // === MAIN REDRAW ===
 
 function redraw() {
@@ -731,6 +816,7 @@ function redraw() {
   drawMcLine(ranges);
   if (!state.compareMode) drawMinSinkMarker(ranges);
   if (state.hoverPoint) drawHoverMarker(ranges);
+  drawLegend();
 }
 
 // === TOOLTIP ===
