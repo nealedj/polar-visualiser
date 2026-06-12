@@ -1019,41 +1019,113 @@ function updateSliderConfigs() {
   state.mc_ms      = sinkDispToMs(parseFloat(mcSlider.value));
 }
 
-// Glider pickers are text inputs backed by a shared <datalist>, so the long
-// list (hundreds of gliders) can be filtered by typing.
 function gliderIndexByName(text) {
   const needle = text.trim().toLowerCase();
   return state.polars.findIndex(p => p.name.toLowerCase() === needle);
 }
 
-function populateGliderList() {
-  const dl = document.getElementById('glider-list');
-  dl.replaceChildren(...state.polars.map(p => {
-    const o = document.createElement('option');
-    o.value = p.name;
-    return o;
-  }));
-}
+// Custom combobox: the full glider list opens on focus (scrolled to the
+// current selection), filters as you type, and commits on click or Enter.
+// A native <datalist> is not used because browsers filter its suggestions
+// by the field's current value and may not open it on click at all.
+function initGliderPicker(input, listEl, getIndex, onPick) {
+  let items  = [];   // visible entries: { idx, el }
+  let active = -1;   // keyboard-highlighted position in items
 
-// Wire a datalist-backed picker: commit on a valid name, revert otherwise.
-function initGliderPicker(input, getIndex, onPick) {
   input.removeAttribute('disabled');
   input.value = state.polars[getIndex()].name;
-  input.addEventListener('focus', () => input.select());
-  const revert = () => { input.value = state.polars[getIndex()].name; };
-  input.addEventListener('change', () => {
-    const idx = gliderIndexByName(input.value);
-    if (idx >= 0 && idx !== getIndex()) onPick(idx);
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+
+  function close() {
+    listEl.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    active = -1;
+  }
+
+  function revert() {
+    input.value = state.polars[getIndex()].name;
+  }
+
+  function pick(idx) {
+    if (idx !== getIndex()) onPick(idx);
     revert();
+    close();
+  }
+
+  function setActive(i) {
+    if (active >= 0 && items[active]) items[active].el.classList.remove('active');
+    active = i;
+    if (i >= 0 && items[i]) {
+      items[i].el.classList.add('active');
+      items[i].el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function render(filter) {
+    const needle = filter.trim().toLowerCase();
+    active = -1;
+    items = [];
+    listEl.replaceChildren();
+    state.polars.forEach((p, idx) => {
+      if (needle && !p.name.toLowerCase().includes(needle)) return;
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.textContent = p.name;
+      // mousedown (not click) so it fires before the input's blur
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        pick(idx);
+        input.blur();
+      });
+      listEl.appendChild(li);
+      items.push({ idx, el: li });
+    });
+    listEl.hidden = items.length === 0;
+    input.setAttribute('aria-expanded', String(!listEl.hidden));
+  }
+
+  function openFull() {
+    input.select();
+    render('');
+    setActive(items.findIndex(it => it.idx === getIndex()));
+  }
+
+  input.addEventListener('focus', openFull);
+  input.addEventListener('click', () => { if (listEl.hidden) openFull(); });
+
+  input.addEventListener('input', () => render(input.value));
+
+  input.addEventListener('blur', () => { revert(); close(); });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (listEl.hidden) { render(input.value); return; }
+      if (e.key === 'ArrowDown') setActive(Math.min(active + 1, items.length - 1));
+      else setActive(Math.max(active - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (active >= 0 && items[active]) {
+        pick(items[active].idx);
+      } else {
+        const exact = gliderIndexByName(input.value);
+        if (exact >= 0) pick(exact);
+        else if (items.length === 1) pick(items[0].idx);
+      }
+      input.blur();
+    } else if (e.key === 'Escape') {
+      revert();
+      close();
+    }
   });
-  input.addEventListener('blur', revert);
 }
 
 function initControls() {
-  populateGliderList();
-
   initGliderPicker(
     document.getElementById('aircraft-select'),
+    document.getElementById('aircraft-list'),
     () => state.selectedIndex,
     (idx) => {
       state.selectedIndex = idx;
@@ -1150,6 +1222,7 @@ function initCompareControls() {
 
   initGliderPicker(
     inputEl,
+    document.getElementById('compare-aircraft-list'),
     () => state.compareIndex,
     (idx) => {
       state.compareIndex = idx;
