@@ -22,7 +22,8 @@ const SINK_UNITS = {
 const SINK_SLIDER = {
   kts: { step: 0.5,  airmassMin: -10,   airmassMax: 10,   mcMax: 10,   decimals: 1 },
   fts: { step: 100,  airmassMin: -2000,  airmassMax: 2000, mcMax: 2000, decimals: 0 },
-  ms:  { step: 0.2,  airmassMin: -5.5,   airmassMax: 5.5,  mcMax: 5.5,  decimals: 1 },
+  // Ranges must be multiples of step so 0 sits on the slider's step grid
+  ms:  { step: 0.2,  airmassMin: -5.6,   airmassMax: 5.6,  mcMax: 5.6,  decimals: 1 },
 };
 
 // Resolved once from CSS variables — canvas can't use CSS vars directly
@@ -37,6 +38,7 @@ const C = {
   minsink: '#9c27b0',
   stall:   '#e65100',
   compare: '#00897b',
+  surface: '#ffffff',
 };
 
 // === APPLICATION STATE ===
@@ -84,11 +86,52 @@ function sinkDispToMs(val) { return val / SINK_UNITS[state.sinkUnit].factor; }
 
 // === DATA FETCHING & PARSING ===
 
+const POLAR_CACHE_KEY = 'polarStore.v1';
+const POLAR_CACHE_TTL = 7 * 24 * 3600 * 1000; // 1 week
+
+function readPolarCache(maxAge) {
+  try {
+    const raw = localStorage.getItem(POLAR_CACHE_KEY);
+    if (!raw) return null;
+    const { ts, polars } = JSON.parse(raw);
+    if (!Array.isArray(polars) || polars.length === 0) return null;
+    if (maxAge !== Infinity && Date.now() - ts > maxAge) return null;
+    return polars;
+  } catch {
+    return null;
+  }
+}
+
+function writePolarCache(polars) {
+  try {
+    localStorage.setItem(POLAR_CACHE_KEY, JSON.stringify({ ts: Date.now(), polars }));
+  } catch { /* storage full or unavailable — cache is best-effort */ }
+}
+
 async function fetchPolars() {
   const resp = await fetch(POLAR_URL);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const text = await resp.text();
   return parsePolars(text);
+}
+
+// Fresh cache → instant load. Otherwise fetch and cache; if the fetch
+// fails, fall back to a stale cache rather than showing an error.
+async function loadPolars() {
+  const fresh = readPolarCache(POLAR_CACHE_TTL);
+  if (fresh) return fresh;
+  try {
+    const polars = await fetchPolars();
+    if (polars.length > 0) writePolarCache(polars);
+    return polars;
+  } catch (err) {
+    const stale = readPolarCache(Infinity);
+    if (stale) {
+      console.warn('Using stale polar cache:', err);
+      return stale;
+    }
+    throw err;
+  }
 }
 
 function parsePolars(cpp) {
@@ -272,11 +315,13 @@ function computeRanges(entry, coeffs) {
 
   // Y axis bottom: worst visible sink + 15% padding
   const w_min_disp = convertRate(w_min_ms, state.sinkUnit) * 1.15;
-  // Y axis top: highest of — curve peak, MC anchor, or 15% of range for breathing room
+  // Y axis top: curve peak or 15% of range for breathing room. The MC anchor
+  // point at (0, mc) is deliberately NOT enveloped — at high MC settings it
+  // would push the polar into the bottom half of the chart; the dashed MC
+  // line simply enters from the top edge instead.
   const totalNeg = Math.abs(w_min_disp);
-  const mc_disp        = state.mc_ms * SINK_UNITS[state.sinkUnit].factor;
   const curve_top_disp = convertRate(w_max_ms, state.sinkUnit);
-  const w_max_disp = Math.max(totalNeg * 0.15, mc_disp + totalNeg * 0.06, curve_top_disp * 1.15);
+  const w_max_disp = Math.max(totalNeg * 0.15, curve_top_disp * 1.15);
 
   return {
     v_min_kmh,
@@ -338,6 +383,10 @@ function resolveColours() {
   apply('axis',    '--color-axis');
   apply('text',    '--color-text');
   apply('compare', '--color-compare');
+  apply('surface', '--color-surface');
+  apply('zeroline','--color-zeroline');
+  apply('minsink', '--color-minsink');
+  apply('stall',   '--color-stall');
 }
 
 // === DRAWING ===
@@ -455,7 +504,7 @@ function drawAxes(ranges) {
   ctx.restore();
 }
 
-function drawPolarCurve(ranges, coeffs, color, stallKmh, curveVmax, label) {
+function drawPolarCurve(ranges, coeffs, color, stallKmh, curveVmax) {
   const { left, right, top, bottom } = chartArea();
 
   ctx.save();
@@ -474,7 +523,6 @@ function drawPolarCurve(ranges, coeffs, color, stallKmh, curveVmax, label) {
   const steps = 300;
   const dv = (curveVmax - v_start) / steps;
   let started = false;
-  let lastPx, lastPy;
 
   for (let i = 0; i <= steps; i++) {
     const v_kmh = v_start + i * dv;
@@ -485,17 +533,8 @@ function drawPolarCurve(ranges, coeffs, color, stallKmh, curveVmax, label) {
 
     if (!started) { ctx.moveTo(px, py); started = true; }
     else ctx.lineTo(px, py);
-    lastPx = px; lastPy = py;
   }
   ctx.stroke();
-
-  if (label && lastPx !== undefined) {
-    ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillStyle = color;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(label, lastPx - 4, lastPy - 4);
-  }
 
   ctx.restore();
 }
@@ -531,8 +570,8 @@ function drawStallMarker(ranges) {
   ctx.restore();
 }
 
-function drawMcLine(ranges) {
-  const mc = computeMcOptimal(state.activeCoeffs, state.mc_ms, state.airmass_ms);
+function drawMcLine(ranges, coeffs, color, labelBelow = false) {
+  const mc = computeMcOptimal(coeffs, state.mc_ms, state.airmass_ms);
   if (!mc) return;
 
   const { v_opt, w_opt } = mc;
@@ -558,7 +597,7 @@ function drawMcLine(ranges) {
   ctx.rect(left, top, right - left, bottom - top);
   ctx.clip();
 
-  ctx.strokeStyle = C.mc;
+  ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([6, 5]);
   ctx.beginPath();
@@ -572,28 +611,34 @@ function drawMcLine(ranges) {
   const py = toCanvasY(w_opt_disp, ranges);
   ctx.beginPath();
   ctx.arc(px, py, 5, 0, Math.PI * 2);
-  ctx.fillStyle = C.mc;
+  ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
 
   // Annotation: "Best Glide" at MC=0, "STF" otherwise
-  const label  = state.mc_ms < 1e-9 ? 'Best Glide' : 'STF';
+  // Primary: label to the right of tangent point, above.
+  // Compare: label to the left of tangent point, below — avoids overlap.
+  const label = state.mc_ms < 1e-9 ? 'Best Glide' : 'STF';
   const spd = v_opt_disp.toFixed(1);
-  const snk = Math.abs(w_opt_disp).toFixed(2);
   ctx.save();
   ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, sans-serif';
-  ctx.fillStyle = C.mc;
-  const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 90);
-  const labelY = py - 18;
-  ctx.textAlign = 'left';
+  ctx.fillStyle = color;
   ctx.textBaseline = 'top';
-  ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, labelY);
-  ctx.fillText(`Sink: ${snk} ${sinkLabel()}`, labelX, labelY + 14);
+  if (labelBelow) {
+    ctx.textAlign = 'right';
+    const labelX = Math.max(px - 8, MARGIN.left + 4);
+    ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, py + 8);
+  } else {
+    ctx.textAlign = 'left';
+    const labelX = Math.min(px + 8, state.canvasW - MARGIN.right - 4);
+    ctx.fillText(`${label}: ${spd} ${speedLabel()}`, labelX, py - 18);
+  }
   ctx.restore();
 
   // Cross-country speed: where the MC line crosses y=0 (zero-rate axis).
   // From rate(v) = mc_disp + slope*v = 0  →  v_cc = -mc_disp / slope
-  // At MC=0 this is 0 (origin); at MC>0 it is a positive speed.
+  // At MC=0 the crossing is the origin and carries no information — skip it.
+  if (state.mc_ms < 1e-9) return;
   const v_cc_disp = Math.abs(slope) > 1e-12 ? -mc_disp / slope : 0;
   const x_cc = toCanvasX(v_cc_disp, ranges);
   const y0   = toCanvasY(0, ranges);
@@ -607,18 +652,25 @@ function drawMcLine(ranges) {
     ctx.lineTo(x_cc,     y0 + 6);
     ctx.lineTo(x_cc - 5, y0);
     ctx.closePath();
-    ctx.fillStyle = C.mc;
+    ctx.fillStyle = color;
     ctx.fill();
-    // Speed label just above the zero line
+    // Speed label: primary anchors left (text extends right), above zero line.
+    // Compare anchors right (text extends left), below zero line.
     ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillStyle = C.mc;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = color;
     const v_cc_kmh = v_cc_disp / SPEED_UNITS[state.speedUnit].factor;
-    const line1 = state.speedUnit === 'kmh'
+    const ccLabel = state.speedUnit === 'kmh'
       ? `${v_cc_kmh.toFixed(0)} km/h`
       : `${v_cc_disp.toFixed(1)} ${speedLabel()} (${v_cc_kmh.toFixed(0)} km/h)`;
-    ctx.fillText(line1, x_cc, y0 - 7);
+    if (labelBelow) {
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(ccLabel, x_cc - 8, y0 + 8);
+    } else {
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(ccLabel, x_cc + 8, y0 - 8);
+    }
     ctx.restore();
   }
 }
@@ -664,6 +716,69 @@ function drawMinSinkMarker(ranges) {
   ctx.textBaseline = 'top';
   ctx.fillText('Min sink', px, py + 7);
   ctx.fillText(`${v_ms_disp.toFixed(1)} ${speedLabel()}`, px, py + 19);
+
+  ctx.restore();
+}
+
+// Best glide ratio in still air: tangent from origin → v = sqrt(c/a)
+function bestGlideRatio(coeffs) {
+  const disc = coeffs.c / coeffs.a;
+  if (disc <= 0) return null;
+  const v_kmh = Math.sqrt(disc);
+  const w_ms = polarSink(coeffs, v_kmh);
+  if (w_ms >= -1e-9) return null;
+  return (v_kmh / 3.6) / Math.abs(w_ms);
+}
+
+// Fixed legend box (top-right) for compare mode — replaces fragile labels at
+// the curve tails, which sat against the chart edge and could be clipped.
+function drawLegend() {
+  const items = [
+    { color: C.polar,   entry: state.polars[state.selectedIndex], coeffs: state.activeCoeffs },
+    { color: C.compare, entry: state.polars[state.compareIndex],  coeffs: state.compareActiveCoeffs },
+  ];
+
+  const { right, top } = chartArea();
+  const pad = 10, rowH = 18, swatchW = 18, gap = 7;
+
+  ctx.save();
+  ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  const texts = items.map(it => {
+    const ld = it.coeffs ? bestGlideRatio(it.coeffs) : null;
+    return ld ? `${it.entry.name} — L/D ${Math.round(ld)}` : it.entry.name;
+  });
+  const textW = Math.max(...texts.map(t => ctx.measureText(t).width));
+  const boxW = pad + swatchW + gap + textW + pad;
+  const boxH = pad * 2 + rowH * items.length - 4;
+  const x = right - boxW - 8;
+  const y = top + 8;
+
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = C.surface;
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, boxW, boxH, 6);
+  else ctx.rect(x, y, boxW, boxH);
+  ctx.fill();
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  items.forEach((it, i) => {
+    const cy = y + pad + rowH * i + 5;
+    ctx.strokeStyle = it.color;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x + pad, cy);
+    ctx.lineTo(x + pad + swatchW, cy);
+    ctx.stroke();
+
+    ctx.fillStyle = C.text;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(texts[i], x + pad + swatchW + gap, cy);
+  });
 
   ctx.restore();
 }
@@ -718,35 +833,58 @@ function redraw() {
   if (!state.compareMode) drawStallMarker(ranges);
 
   drawPolarCurve(ranges, state.activeCoeffs, C.polar,
-                 primaryStall, entry.v_max_kmh,
-                 state.compareMode ? entry.name : null);
+                 primaryStall, entry.v_max_kmh);
 
   if (state.compareMode && state.compareActiveCoeffs) {
     const cEntry = state.polars[state.compareIndex];
     const cStall = computeStallSpeed(cEntry, state.compareBallast_kg);
     drawPolarCurve(ranges, state.compareActiveCoeffs, C.compare,
-                   cStall, cEntry.v_max_kmh, cEntry.name);
+                   cStall, cEntry.v_max_kmh);
   }
 
-  drawMcLine(ranges);
+  drawMcLine(ranges, state.activeCoeffs, state.compareMode ? C.polar : C.mc);
+  if (state.compareMode && state.compareActiveCoeffs) {
+    drawMcLine(ranges, state.compareActiveCoeffs, C.compare, true);
+  }
   if (!state.compareMode) drawMinSinkMarker(ranges);
+  if (state.compareMode) drawLegend();
   if (state.hoverPoint) drawHoverMarker(ranges);
 }
 
 // === TOOLTIP ===
 
-const tooltip  = document.getElementById('tooltip');
-const tipSpeed = document.getElementById('tip-speed');
-const tipSink  = document.getElementById('tip-sink');
-const tipLd    = document.getElementById('tip-ld');
+const tooltip       = document.getElementById('tooltip');
+const tipSpeed      = document.getElementById('tip-speed');
+const tipSink       = document.getElementById('tip-sink');
+const tipCompareSink = document.getElementById('tip-compare-sink');
+const tipLd          = document.getElementById('tip-ld');
+const tipCompareLd   = document.getElementById('tip-compare-ld');
 
 function showTooltip(px, py, v_kmh, w_ms) {
   const rateDisp = convertRate(w_ms, state.sinkUnit);
   const sign = rateDisp >= 0 ? '+' : '';
   tipSpeed.textContent = `${convertSpeed(v_kmh, state.speedUnit).toFixed(1)} ${speedLabel()}`;
   tipSink.textContent  = `${sign}${rateDisp.toFixed(2)} ${sinkLabel()}`;
-  // L/D: forward speed (m/s) divided by sink speed (m/s), only meaningful when sinking
+
   const v_ms = v_kmh / 3.6;
+
+  if (state.compareMode && state.compareActiveCoeffs) {
+    const cw_ms = polarSink(state.compareActiveCoeffs, v_kmh) + state.airmass_ms;
+    const cRateDisp = convertRate(cw_ms, state.sinkUnit);
+    const cSign = cRateDisp >= 0 ? '+' : '';
+    tipCompareSink.textContent = `${cSign}${cRateDisp.toFixed(2)} ${sinkLabel()}`;
+    tipCompareSink.removeAttribute('hidden');
+    const cLd = cw_ms < -0.01 ? (v_ms / Math.abs(cw_ms)).toFixed(1) : '—';
+    tipCompareLd.textContent = `L/D: ${cLd}`;
+    tipCompareLd.removeAttribute('hidden');
+    tooltip.classList.add('comparing');
+  } else {
+    tipCompareSink.setAttribute('hidden', '');
+    tipCompareLd.setAttribute('hidden', '');
+    tooltip.classList.remove('comparing');
+  }
+
+  // L/D: forward speed (m/s) divided by sink speed (m/s), only meaningful when sinking
   const ld = w_ms < -0.01 ? (v_ms / Math.abs(w_ms)).toFixed(1) : '—';
   tipLd.textContent = `L/D: ${ld}`;
 
@@ -795,24 +933,65 @@ function handlePointer(e) {
   showTooltip(px, py, v_kmh, w_ms);
 }
 
-canvas.addEventListener('pointermove', handlePointer);
-canvas.addEventListener('pointerdown', handlePointer);
-canvas.addEventListener('pointerleave', () => {
-  state.hoverPoint = null;
-  redraw();
-  hideTooltip();
+// Touch: tap-to-show/hide, drag-to-track. Mouse: hover as normal.
+const DRAG_THRESHOLD = 8;
+let touchStartPos = null;
+let touchDragging  = false;
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') { handlePointer(e); return; }
+  touchStartPos = { x: e.clientX, y: e.clientY };
+  touchDragging  = false;
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') { handlePointer(e); return; }
+  if (!touchStartPos) return;
+  const dx = e.clientX - touchStartPos.x;
+  const dy = e.clientY - touchStartPos.y;
+  if (!touchDragging && Math.hypot(dx, dy) > DRAG_THRESHOLD) touchDragging = true;
+  if (touchDragging) handlePointer(e);
+});
+
+canvas.addEventListener('pointerup', (e) => {
+  if (e.pointerType !== 'touch') return;
+  if (!touchDragging) {
+    // Tap: toggle visibility
+    if (state.hoverPoint) {
+      state.hoverPoint = null; redraw(); hideTooltip();
+    } else {
+      handlePointer(e);
+    }
+  }
+  touchStartPos = null;
+  touchDragging  = false;
+});
+
+canvas.addEventListener('pointercancel', () => {
+  touchStartPos = null; touchDragging = false;
+});
+
+canvas.addEventListener('pointerleave', (e) => {
+  if (e.pointerType === 'touch') return; // touch manages its own lifecycle
+  state.hoverPoint = null; redraw(); hideTooltip();
 });
 
 // === UI CONTROLS ===
 
 function updateSliderLabels() {
-  const airmassDisp = parseFloat(document.getElementById('airmass-slider').value);
-  const mcDisp      = parseFloat(document.getElementById('mc-slider').value);
+  const airmassSlider = document.getElementById('airmass-slider');
+  const mcSlider      = document.getElementById('mc-slider');
+  const airmassDisp = parseFloat(airmassSlider.value);
+  const mcDisp      = parseFloat(mcSlider.value);
   const dec = SINK_SLIDER[state.sinkUnit].decimals;
 
-  document.getElementById('airmass-value').textContent =
-    (airmassDisp >= 0 ? '+' : '') + airmassDisp.toFixed(dec);
-  document.getElementById('mc-value').textContent = mcDisp.toFixed(dec);
+  const airmassText = (airmassDisp >= 0 ? '+' : '') + airmassDisp.toFixed(dec);
+  const mcText      = mcDisp.toFixed(dec);
+  document.getElementById('airmass-value').textContent = airmassText;
+  document.getElementById('mc-value').textContent = mcText;
+  airmassSlider.setAttribute('aria-valuetext', `${airmassText} ${sinkLabel()}`);
+  mcSlider.setAttribute('aria-valuetext', `${mcText} ${sinkLabel()}`);
 
   document.querySelectorAll('.airmass-unit, .mc-unit').forEach(el => {
     el.textContent = sinkLabel();
@@ -833,43 +1012,153 @@ function updateSliderConfigs() {
   mcSlider.max   = cfg.mcMax;
   mcSlider.step  = cfg.step;
   mcSlider.value = msToSinkDisp(state.mc_ms);
+
+  // The browser snaps slider values to the step grid — read them back so
+  // the chart always matches what the labels show.
+  state.airmass_ms = sinkDispToMs(parseFloat(airmassSlider.value));
+  state.mc_ms      = sinkDispToMs(parseFloat(mcSlider.value));
+}
+
+function gliderIndexByName(text) {
+  const needle = text.trim().toLowerCase();
+  return state.polars.findIndex(p => p.name.toLowerCase() === needle);
+}
+
+// Custom combobox: the full glider list opens on focus (scrolled to the
+// current selection), filters as you type, and commits on click or Enter.
+// A native <datalist> is not used because browsers filter its suggestions
+// by the field's current value and may not open it on click at all.
+function initGliderPicker(input, listEl, getIndex, onPick) {
+  let items  = [];   // visible entries: { idx, el }
+  let active = -1;   // keyboard-highlighted position in items
+
+  input.removeAttribute('disabled');
+  input.value = state.polars[getIndex()].name;
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-expanded', 'false');
+
+  function close() {
+    listEl.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    active = -1;
+  }
+
+  function revert() {
+    input.value = state.polars[getIndex()].name;
+  }
+
+  function pick(idx) {
+    if (idx !== getIndex()) onPick(idx);
+    revert();
+    close();
+  }
+
+  function setActive(i) {
+    if (active >= 0 && items[active]) items[active].el.classList.remove('active');
+    active = i;
+    if (i >= 0 && items[i]) {
+      items[i].el.classList.add('active');
+      items[i].el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function render(filter) {
+    const needle = filter.trim().toLowerCase();
+    active = -1;
+    items = [];
+    listEl.replaceChildren();
+    state.polars.forEach((p, idx) => {
+      if (needle && !p.name.toLowerCase().includes(needle)) return;
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.textContent = p.name;
+      // mousedown (not click) so it fires before the input's blur
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        pick(idx);
+        input.blur();
+      });
+      listEl.appendChild(li);
+      items.push({ idx, el: li });
+    });
+    listEl.hidden = items.length === 0;
+    input.setAttribute('aria-expanded', String(!listEl.hidden));
+  }
+
+  function openFull() {
+    input.select();
+    render('');
+    setActive(items.findIndex(it => it.idx === getIndex()));
+  }
+
+  input.addEventListener('focus', openFull);
+  input.addEventListener('click', () => { if (listEl.hidden) openFull(); });
+
+  input.addEventListener('input', () => render(input.value));
+
+  input.addEventListener('blur', () => { revert(); close(); });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (listEl.hidden) { render(input.value); return; }
+      if (e.key === 'ArrowDown') setActive(Math.min(active + 1, items.length - 1));
+      else setActive(Math.max(active - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (active >= 0 && items[active]) {
+        pick(items[active].idx);
+      } else {
+        const exact = gliderIndexByName(input.value);
+        if (exact >= 0) pick(exact);
+        else if (items.length === 1) pick(items[0].idx);
+      }
+      input.blur();
+    } else if (e.key === 'Escape') {
+      revert();
+      close();
+    }
+  });
 }
 
 function initControls() {
-  const select = document.getElementById('aircraft-select');
-
-  select.innerHTML = state.polars
-    .map((p, i) => `<option value="${i}">${p.name}</option>`)
-    .join('');
-  select.removeAttribute('disabled');
-  select.value = String(state.selectedIndex);
-
-  select.addEventListener('change', () => {
-    state.selectedIndex = parseInt(select.value, 10);
-    state.coeffs = fitPolar(state.polars[state.selectedIndex]);
-    state.ballast_kg = 0;
-    updateActiveCoeffs();
-    updateBallastSlider();
-    state.hoverPoint = null;
-    hideTooltip();
-    redraw();
-  });
+  initGliderPicker(
+    document.getElementById('aircraft-select'),
+    document.getElementById('aircraft-list'),
+    () => state.selectedIndex,
+    (idx) => {
+      state.selectedIndex = idx;
+      state.coeffs = fitPolar(state.polars[idx]);
+      state.ballast_kg = 0;
+      updateActiveCoeffs();
+      updateBallastSlider();
+      state.hoverPoint = null;
+      hideTooltip();
+      redraw();
+      scheduleHashUpdate();
+    }
+  );
 
   document.querySelectorAll('input[name="speed-unit"]').forEach(r => {
+    r.checked = r.value === state.speedUnit;
     r.addEventListener('change', () => {
       if (!r.checked) return;
       state.speedUnit = r.value;
       redraw();
+      scheduleHashUpdate();
     });
   });
 
   document.querySelectorAll('input[name="sink-unit"]').forEach(r => {
+    r.checked = r.value === state.sinkUnit;
     r.addEventListener('change', () => {
       if (!r.checked) return;
       state.sinkUnit = r.value;
       updateSliderConfigs();
       updateSliderLabels();
       redraw();
+      scheduleHashUpdate();
     });
   });
 
@@ -877,19 +1166,23 @@ function initControls() {
     state.airmass_ms = sinkDispToMs(parseFloat(this.value));
     updateSliderLabels();
     redraw();
+    scheduleHashUpdate();
   });
 
   document.getElementById('mc-slider').addEventListener('input', function () {
     state.mc_ms = sinkDispToMs(parseFloat(this.value));
     updateSliderLabels();
     redraw();
+    scheduleHashUpdate();
   });
 
   document.getElementById('ballast-slider').addEventListener('input', function () {
     state.ballast_kg = parseInt(this.value, 10);
     document.getElementById('ballast-value').textContent = state.ballast_kg;
+    this.setAttribute('aria-valuetext', `${state.ballast_kg} kg of ${this.max} kg`);
     updateActiveCoeffs();
     redraw();
+    scheduleHashUpdate();
   });
 
   updateBallastSlider();
@@ -901,37 +1194,54 @@ function initControls() {
 function initCompareControls() {
   const toggle      = document.getElementById('compare-toggle');
   const group       = document.getElementById('compare-aircraft-group');
-  const selectEl    = document.getElementById('compare-aircraft-select');
+  const inputEl     = document.getElementById('compare-aircraft-select');
   const ballastGrp  = document.getElementById('compare-ballast-group');
   const ballastSldr = document.getElementById('compare-ballast-slider');
   const ballastVal  = document.getElementById('compare-ballast-value');
   const ballastMax  = document.getElementById('compare-ballast-max');
 
-  selectEl.innerHTML = state.polars
-    .map((p, i) => `<option value="${i}">${p.name}</option>`)
-    .join('');
-  state.compareIndex = state.polars.length > 1 ? 1 : 0;
-  selectEl.value = String(state.compareIndex);
-  selectEl.removeAttribute('disabled');
+  // Default compare glider, unless one was already restored from the URL
+  if (!state.compareMode) {
+    state.compareIndex = state.polars.length > 1 ? 1 : 0;
+  }
 
+  // Preserves state.compareBallast_kg (clamped to the new glider's max)
   function loadCompareGlider() {
     const cEntry = state.polars[state.compareIndex];
-    state.compareBallast_kg = 0;
+    const max = cEntry.max_ballast || 0;
+    state.compareBallast_kg = Math.min(state.compareBallast_kg, max);
     state.compareCoeffs = fitPolar(cEntry);
     updateCompareCoeffs();
-    const max = cEntry.max_ballast || 0;
     ballastSldr.max      = max;
-    ballastSldr.value    = 0;
+    ballastSldr.value    = state.compareBallast_kg;
     ballastSldr.disabled = max === 0;
-    ballastVal.textContent = '0';
+    ballastSldr.setAttribute('aria-valuetext', `${state.compareBallast_kg} kg of ${max} kg`);
+    ballastVal.textContent = String(state.compareBallast_kg);
     ballastMax.textContent = max > 0 ? `/ ${max} kg` : '(none)';
+  }
+
+  initGliderPicker(
+    inputEl,
+    document.getElementById('compare-aircraft-list'),
+    () => state.compareIndex,
+    (idx) => {
+      state.compareIndex = idx;
+      state.compareBallast_kg = 0;
+      loadCompareGlider();
+      redraw();
+      scheduleHashUpdate();
+    }
+  );
+
+  function setCompareVisible(on) {
+    toggle.setAttribute('aria-pressed', String(on));
+    group.hidden      = !on;
+    ballastGrp.hidden = !on;
   }
 
   toggle.addEventListener('click', () => {
     state.compareMode = !state.compareMode;
-    toggle.setAttribute('aria-pressed', String(state.compareMode));
-    group.hidden      = !state.compareMode;
-    ballastGrp.hidden = !state.compareMode;
+    setCompareVisible(state.compareMode);
     if (state.compareMode) {
       loadCompareGlider();
     } else {
@@ -941,31 +1251,104 @@ function initCompareControls() {
     state.hoverPoint = null;
     hideTooltip();
     redraw();
-  });
-
-  selectEl.addEventListener('change', () => {
-    state.compareIndex = parseInt(selectEl.value, 10);
-    loadCompareGlider();
-    redraw();
+    scheduleHashUpdate();
   });
 
   ballastSldr.addEventListener('input', function () {
     state.compareBallast_kg = parseInt(this.value, 10);
     ballastVal.textContent = state.compareBallast_kg;
+    this.setAttribute('aria-valuetext', `${state.compareBallast_kg} kg of ${this.max} kg`);
     updateCompareCoeffs();
     redraw();
+    scheduleHashUpdate();
   });
+
+  // Restore compare mode from the URL hash
+  if (state.compareMode) {
+    setCompareVisible(true);
+    loadCompareGlider();
+  }
 }
 
+// Preserves state.ballast_kg (clamped to the glider's max) so restored URL
+// state survives; callers that want a reset zero state.ballast_kg first.
 function updateBallastSlider() {
   const entry  = state.polars[state.selectedIndex];
   const max    = entry.max_ballast || 0;
   const slider = document.getElementById('ballast-slider');
+  state.ballast_kg = Math.min(state.ballast_kg, max);
   slider.max   = max;
-  slider.value = 0;
+  slider.value = state.ballast_kg;
   slider.disabled = max === 0;
-  document.getElementById('ballast-value').textContent = '0';
+  slider.setAttribute('aria-valuetext', `${state.ballast_kg} kg of ${max} kg`);
+  document.getElementById('ballast-value').textContent = String(state.ballast_kg);
   document.getElementById('ballast-max').textContent   = max > 0 ? `/ ${max} kg` : '(none)';
+}
+
+// === URL STATE ===
+// The full configuration lives in the hash so any view can be shared as a
+// link, e.g. #g=Discus&su=kts&zu=ms&mc=1.5&b=50&cmp=1&cg=LS-4
+
+function applyHashState() {
+  const params = new URLSearchParams(location.hash.slice(1));
+
+  const su = params.get('su');
+  if (su && SPEED_UNITS[su]) state.speedUnit = su;
+  const zu = params.get('zu');
+  if (zu && SINK_UNITS[zu]) state.sinkUnit = zu;
+
+  const g = params.get('g');
+  if (g) {
+    const idx = gliderIndexByName(g);
+    if (idx >= 0) state.selectedIndex = idx;
+  }
+
+  const cfg = SINK_SLIDER[state.sinkUnit];
+  const am = parseFloat(params.get('am'));
+  if (Number.isFinite(am)) {
+    state.airmass_ms = Math.max(sinkDispToMs(cfg.airmassMin),
+                                Math.min(sinkDispToMs(cfg.airmassMax), am));
+  }
+  const mc = parseFloat(params.get('mc'));
+  if (Number.isFinite(mc)) {
+    state.mc_ms = Math.max(0, Math.min(sinkDispToMs(cfg.mcMax), mc));
+  }
+
+  const b = parseInt(params.get('b'), 10);
+  if (Number.isFinite(b)) {
+    const max = state.polars[state.selectedIndex].max_ballast || 0;
+    state.ballast_kg = Math.max(0, Math.min(max, b));
+  }
+
+  if (params.get('cmp') === '1') {
+    state.compareMode = true;
+    const cg = params.get('cg');
+    if (cg) {
+      const idx = gliderIndexByName(cg);
+      if (idx >= 0) state.compareIndex = idx;
+    }
+    const cb = parseInt(params.get('cb'), 10);
+    if (Number.isFinite(cb)) {
+      const max = state.polars[state.compareIndex].max_ballast || 0;
+      state.compareBallast_kg = Math.max(0, Math.min(max, cb));
+    }
+  }
+}
+
+function updateHash() {
+  const p = new URLSearchParams();
+  p.set('g', state.polars[state.selectedIndex].name);
+  p.set('su', state.speedUnit);
+  p.set('zu', state.sinkUnit);
+  if (state.airmass_ms !== 0) p.set('am', state.airmass_ms.toFixed(3));
+  if (state.mc_ms > 0)        p.set('mc', state.mc_ms.toFixed(3));
+  if (state.ballast_kg > 0)   p.set('b', String(state.ballast_kg));
+  if (state.compareMode) {
+    p.set('cmp', '1');
+    p.set('cg', state.polars[state.compareIndex].name);
+    if (state.compareBallast_kg > 0) p.set('cb', String(state.compareBallast_kg));
+  }
+  history.replaceState(null, '', '#' + p.toString());
 }
 
 // === INITIALISATION ===
@@ -975,31 +1358,54 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
 }
 
+const scheduleHashUpdate = debounce(updateHash, 250);
+
+const chartStatus = document.getElementById('chart-status');
+
+function setStatus(text) {
+  chartStatus.textContent = text;
+  chartStatus.removeAttribute('hidden');
+}
+
+function clearStatus() {
+  chartStatus.setAttribute('hidden', '');
+}
+
 async function init() {
   resolveColours();
   resizeCanvas();
 
-  window.addEventListener('resize', debounce(() => { resizeCanvas(); redraw(); }, 150));
+  // Redraw whenever the chart container changes size — not just on window
+  // resize: toggling compare mode grows the control bar and shrinks the chart.
+  const ro = new ResizeObserver(debounce(() => { resizeCanvas(); redraw(); }, 100));
+  ro.observe(canvas.parentElement);
+
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     resolveColours(); redraw();
   });
 
+  setStatus('Loading polar data…');
   try {
-    state.polars = await fetchPolars();
+    state.polars = await loadPolars();
     if (state.polars.length === 0) throw new Error('No polars parsed');
 
     const defaultIdx = state.polars.findIndex(p => p.name.startsWith('Discus'));
     state.selectedIndex = defaultIdx >= 0 ? defaultIdx : 0;
+
+    applyHashState();
+
     state.coeffs = fitPolar(state.polars[state.selectedIndex]);
     updateActiveCoeffs();
 
+    clearStatus();
     initControls();
     redraw();
   } catch (err) {
     console.error('Failed to load polars:', err);
-    const select = document.getElementById('aircraft-select');
-    select.innerHTML = '<option>Error loading polars</option>';
-    select.disabled = true;
+    setStatus('Failed to load polar data — check your connection and reload the page.');
+    const input = document.getElementById('aircraft-select');
+    input.placeholder = 'Error loading polars';
+    input.disabled = true;
   }
 }
 

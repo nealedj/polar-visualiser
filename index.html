@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive glider polar curve visualiser — explore sink rate, best glide, MacCready speed-to-fly, ballast and airmass effects for hundreds of gliders.">
+  <meta name="theme-color" content="#1565c0">
+  <meta property="og:title" content="Glider Polar Visualiser">
+  <meta property="og:description" content="Interactive glider polar curve visualiser — explore sink rate, best glide, MacCready speed-to-fly, ballast and airmass effects for hundreds of gliders.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://polars.neale.dev/">
   <title>Glider Polar Visualiser</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231565c0'/%3E%3Cpath d='M5 13 Q 11 6 17 12 Q 23 18 28 28' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -14,20 +21,24 @@
 
     <div id="controls">
       <div class="control-group aircraft-group">
-        <label for="aircraft-select">Aircraft</label>
-        <select id="aircraft-select" disabled>
-          <option>Loading polars…</option>
-        </select>
-      </div>
-
-      <div class="control-group compare-group">
-        <label>Compare</label>
-        <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
+        <label for="aircraft-select"><span class="color-swatch" style="background:var(--color-polar)"></span>Aircraft</label>
+        <div class="aircraft-row">
+          <div class="combo">
+            <input id="aircraft-select" placeholder="Loading polars…"
+                   autocomplete="off" spellcheck="false" disabled>
+            <ul id="aircraft-list" class="combo-list" role="listbox" hidden></ul>
+          </div>
+          <button id="compare-toggle" class="compare-btn" aria-pressed="false">Compare gliders</button>
+        </div>
       </div>
 
       <div class="control-group aircraft-group" id="compare-aircraft-group" hidden>
-        <label for="compare-aircraft-select">Compare aircraft</label>
-        <select id="compare-aircraft-select" disabled><option>Loading…</option></select>
+        <label for="compare-aircraft-select"><span class="color-swatch" style="background:var(--color-compare)"></span>Compare aircraft</label>
+        <div class="combo">
+          <input id="compare-aircraft-select" placeholder="Loading…"
+                 autocomplete="off" spellcheck="false" disabled>
+          <ul id="compare-aircraft-list" class="combo-list" role="listbox" hidden></ul>
+        </div>
       </div>
 
       <div class="control-group">
@@ -79,13 +90,24 @@
     </div>
 
     <div id="chart-container">
-      <canvas id="polar-canvas"></canvas>
+      <canvas id="polar-canvas" role="img" aria-label="Glider polar curve chart">
+        Interactive chart of the selected glider's polar curve.
+      </canvas>
+      <div id="chart-status" role="status">Loading polar data…</div>
       <div id="tooltip" hidden>
         <div id="tip-speed"></div>
         <div id="tip-sink"></div>
+        <div id="tip-compare-sink" hidden></div>
         <div id="tip-ld"></div>
+        <div id="tip-compare-ld" hidden></div>
       </div>
     </div>
+
+    <footer id="attribution">
+      Polar data from the <a href="https://xcsoar.org" target="_blank" rel="noopener">XCSoar</a>
+      project — <a href="https://github.com/XCSoar/XCSoar/blob/master/src/Polar/PolarStore.cpp" target="_blank" rel="noopener">PolarStore.cpp</a>,
+      licensed under <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html" target="_blank" rel="noopener">GPL-2.0</a>.
+    </footer>
   </div>
 
   <script type="module" src="./app.js"></script>
